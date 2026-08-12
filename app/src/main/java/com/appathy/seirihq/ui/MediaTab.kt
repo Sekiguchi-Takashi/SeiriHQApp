@@ -684,7 +684,6 @@ private fun TrashScreen(store: Store, modifier: Modifier, onBack: () -> Unit) {
             Column(modifier = Modifier.padding(24.dp)) {
                 Text("ゴミ箱は空です。")
             }
-            return@Column
         }
         Column(
             modifier = Modifier

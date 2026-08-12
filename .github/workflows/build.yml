@@ -21,9 +21,24 @@ jobs:
           gradle-version: '8.9'
 
       - name: assembleDebug
-        run: gradle assembleDebug --no-daemon --stacktrace
+        shell: bash
+        run: |
+          gradle assembleDebug --no-daemon 2>&1 | tee build.log
+
+      - name: compile errors
+        if: failure()
+        shell: bash
+        run: |
+          grep -E "^e: |error:" build.log | head -80
 
       - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-log
+          path: build.log
+
+      - uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: SeiriHQApp-debug
           path: app/build/outputs/apk/debug/*.apk
