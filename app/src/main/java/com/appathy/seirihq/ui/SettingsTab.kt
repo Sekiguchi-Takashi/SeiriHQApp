@@ -167,7 +167,7 @@ fun SettingsTab(store: Store, modifier: Modifier = Modifier) {
                         Text("削除の前に認証する", modifier = Modifier.weight(1f))
                         Switch(
                             checked = store.authOnDelete,
-                            onCheckedChange = { store.setAuthOnDelete(it) }
+                            onCheckedChange = { store.updateAuthOnDelete(it) }
                         )
                     }
                     Spacer(Modifier.height(8.dp))
@@ -212,7 +212,7 @@ fun SettingsTab(store: Store, modifier: Modifier = Modifier) {
                         listOf(7, 14, 30).forEach { days ->
                             FilterChip(
                                 selected = store.retentionDays == days,
-                                onClick = { store.setRetentionDays(days) },
+                                onClick = { store.updateRetentionDays(days) },
                                 label = { Text("${days}日") }
                             )
                         }

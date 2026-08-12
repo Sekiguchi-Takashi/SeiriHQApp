@@ -2,7 +2,7 @@
 
 ## 現在地
 
-v1.2。プロンプト交通整理と素材交通整理を1アプリに統合した最小構成に、
+v1.2.2。プロンプト交通整理と素材交通整理を1アプリに統合した最小構成に、
 パスコード＋指紋のロック、ファイル権限による原本削除、ゴミ箱を追加した。
 
 ## 構成
@@ -41,6 +41,9 @@ SeiriHQApp/
 - ゴミ箱への複製は Dispatchers.IO。複製成功後にだけ原本を削除し、キャンセル時は複製を消す
 - ゴミ箱フォルダは OpenDocumentTree で選び、read/write を永続化する
 - アプリ内ゴミ箱の共有は FileProvider（authorities は ${applicationId}.fileprovider）
+- Store のプロパティと同名のセッター関数は JVM シグネチャが衝突する。
+  `var retentionDays` と `fun setRetentionDays()` は共存できないため、
+  更新用の関数は `updateRetentionDays` / `updateAuthOnDelete` と命名している
 
 ## 次にやること（優先順）
 

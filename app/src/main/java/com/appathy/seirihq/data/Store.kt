@@ -68,7 +68,7 @@ class Store(context: Context) {
         repo.setState(KEY_TRASH_TREE, uri ?: "")
     }
 
-    fun setRetentionDays(days: Int) {
+    fun updateRetentionDays(days: Int) {
         retentionDays = days
         repo.setState(KEY_RETENTION, days.toString())
     }
@@ -260,7 +260,7 @@ class Store(context: Context) {
         repo.setState(KEY_BIOMETRIC, if (on) "1" else "0")
     }
 
-    fun setAuthOnDelete(on: Boolean) {
+    fun updateAuthOnDelete(on: Boolean) {
         authOnDelete = on
         repo.setState(KEY_AUTH_ON_DELETE, if (on) "1" else "0")
     }
