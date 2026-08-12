@@ -212,6 +212,7 @@ private fun PromptTopScreen(
                         enabled = composed.isNotEmpty(),
                         onClick = {
                             clipboard.setText(AnnotatedString(composed))
+                            store.noteCopiedPrompt()
                             Toast.makeText(context, "コピーしました", Toast.LENGTH_SHORT).show()
                         }
                     ) { Text("コピー") }

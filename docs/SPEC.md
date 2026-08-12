@@ -1,4 +1,4 @@
-# 整理HQ（SeiriHQApp）統合仕様書 — v1.3
+# 整理HQ（SeiriHQApp）統合仕様書 — v1.6
 
 ## 1. 概要
 
@@ -287,11 +287,151 @@ AI安全ルールS-001（AIは原本を勝手に削除しない）は維持す�
 
 未対応：アプリ内での動画再生、フレームサンプリングによる内容解析（Phase 2以降）。
 
+
+---
+
+## 4.9 交通整理モード（v1.4）
+
+未整理の素材を1件ずつ処理する画面。アプリの中心となる操作。
+
+```text
+未整理の待ち行列
+   ↓
+1件表示（残り件数を表示）
+   ↓
+上：プロジェクトへ追加 → 整理済み
+右：保留
+左：アーカイブ
+下：削除候補
+   ↓
+次の1件へ
+```
+
+スワイプとボタンの両方で操作できる。方向は上記固定（設定での変更はPhase 1の残件）。
+
+状態に「削除候補」を追加した。ここでは削除せず、印を付けるだけ。
+実際に消すかどうかはInboxで「削除候補」を絞り込んで判断する。
+
+---
+
+## 4.10 プロジェクト画面（v1.4）
+
+```text
+プロジェクト一覧
+├─ 名前
+├─ 素材数
+└─ 未整理数
+     ↓
+プロジェクト詳細
+├─ すべて / 未整理 / 整理済み で絞り込み
+└─ 素材グリッド → 素材詳細
+```
+
+プロジェクトの作成・削除は設定タブのまま。ここは閲覧と絞り込みに徹する。
+
+---
+
+## 4.11 ゴミ箱の定期削除（v1.4）
+
+```text
+アプリ起動時        期限切れを完全削除
+WorkManager 1日1回  アプリを開かなくても完全削除
+```
+
+アプリを起動しない日が続いてもゴミ箱が膨らまないようにする。
+
+
+---
+
+## 4.12 削除候補の一括処理（v1.5）
+
+```text
+Inbox で「削除候補」を絞り込む
+   ↓
+[N件をまとめてゴミ箱へ]
+   ↓
+認証 → 確認
+   ↓
+1. 全件をゴミ箱へコピー
+2. MediaStore由来はまとめて1回の確認画面（Android 11以上）
+3. それ以外は個別に削除
+   ↓
+コピーできなかった分・削除できなかった分は元のまま残す
+```
+
+Android 11以上では複数のURIを1つの削除リクエストにまとめられるため、
+何十件でもシステムの確認画面は1回で済む。
+
+削除できない素材（権限のないSAF素材など）は対象から外し、件数を通知する。
+
+---
+
+## 4.13 プロンプトと素材の連携（v1.5）
+
+統合したことの本来の狙いだった導線。
+
+```text
+プロンプトをコピー
+   ↓
+その時点の①②を「直前のプロンプト」として記録
+   ↓
+生成した画像・動画を取り込む
+   ↓
+生成元プロンプトとして自動で紐づけ（設定でOFF可）
+   ↓
+素材詳細から
+├─ 生成元プロンプトを確認・変更・解除
+└─ [このプロンプトを使う] でプロンプトタブに再設定
+```
+
+`media.source_prompt_id` に保持する。0は未設定。
+自動で付くのは取り込み時のみで、あとから手動で変更できる。
+
+
+---
+
+## 4.14 フォルダから取り込み（v1.6）
+
+```text
+[フォルダから取り込み]
+   ↓
+フォルダを選ぶ（SAF・読み書きを永続化）
+   ↓
+直下の画像・動画をすべて登録
+   ↓
+件数を通知
+```
+
+- 対象は選んだフォルダの直下のみ。サブフォルダはたどらない
+- 原本はコピーせず参照として登録する
+- フォルダに書き込み権限を取れているため、これらの素材は端末から削除できる
+- 同じURIは重複登録されない
+
+## 4.15 ZIPにまとめる（v1.6）
+
+```text
+Inbox で選択モードに入る（右上のチェック）
+   ↓
+サムネイルをタップして選ぶ／表示中を全選択
+   ↓
+[ZIPにする N]
+   ↓
+保存先とファイル名を指定（SAF）
+   ↓
+ZIPを書き出す
+```
+
+- 保存先はSAFで指定するため、クラウドのフォルダにも直接書き出せる
+- ファイル名の既定は `seirihq_日時.zip`
+- 同名の素材が含まれる場合は `名前_2.拡張子` のように自動で振り分ける
+- 読み込めなかった素材は飛ばし、書き出せた件数を通知する
+- 素材そのものは移動・削除しない
+
 ---
 
 ## 5. データモデル（実装済み）
 
-SQLite（`seirihq.db` / version 3）。両機能で1つのDBを共有する。
+SQLite（`seirihq.db` / version 4）。両機能で1つのDBを共有する。
 
 ```text
 prompt(id, kind['fixed'|'temp'], name, description, body, created_at, updated_at)
@@ -299,8 +439,10 @@ state(key, value)                       -- active_fixed / active_temp / pin_hash
                                         -- biometric_enabled / auth_on_delete
                                         -- trash_tree / retention_days
                                         -- clean_tree / use_trash
+                                        -- last_prompt / link_imports
 project(id, name, created_at)
-media(id, uri UNIQUE, kind, name, status, tags, added_at, source, writable)
+media(id, uri UNIQUE, kind, name, status, tags, added_at, source, writable,
+      source_prompt_id)
 media_project(media_id, project_id)     -- N:M
 trash(id, name, kind, uri, tags, deleted_at, expire_at)
 ```
@@ -316,7 +458,7 @@ trash(id, name, kind, uri, tags, deleted_at, expire_at)
 
 ```text
 MediaStatus
-未整理 / 整理済み / 保留 / アーカイブ
+未整理 / 整理済み / 保留 / アーカイブ / 削除候補
 
 PromptState
 activeFixed / activeTemp / customPrompt → finalPrompt を都度再生成
@@ -402,6 +544,7 @@ SQLiteOpenHelper（アノテーション処理なし）
 Coil / coil-video（画像・動画サムネイル。SeiriApp で ImageLoader を差し替え）
 androidx.biometric（指紋認証。MainActivity は FragmentActivity）
 androidx.documentfile（ゴミ箱フォルダへの書き込み）
+androidx.work（ゴミ箱の定期削除）
 FileProvider（アプリ内ゴミ箱のファイル共有）
 GitHub Actions で assembleDebug
 app/debug.keystore を固定（上書きインストール可）

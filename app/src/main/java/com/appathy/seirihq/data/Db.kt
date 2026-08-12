@@ -28,11 +28,13 @@ const val SOURCE_TRASH = "trash"
 
 const val KEY_TRASH_TREE = "trash_tree"
 const val KEY_CLEAN_TREE = "clean_tree"
+const val KEY_LAST_PROMPT = "last_prompt"
+const val KEY_LINK_IMPORTS = "link_imports"
 const val KEY_USE_TRASH = "use_trash"
 const val KEY_RETENTION = "retention_days"
 const val DEFAULT_RETENTION_DAYS = 14
 
-val MEDIA_STATUSES = listOf("未整理", "整理済み", "保留", "アーカイブ")
+val MEDIA_STATUSES = listOf("未整理", "整理済み", "保留", "アーカイブ", "削除候補")
 
 data class PromptItem(
     val id: Long,
@@ -58,7 +60,8 @@ data class MediaItem(
     val addedAt: Long,
     val projectIds: List<Long>,
     val source: String,
-    val writable: Boolean
+    val writable: Boolean,
+    val sourcePromptId: Long
 )
 
 data class TrashItem(
@@ -71,7 +74,7 @@ data class TrashItem(
     val expireAt: Long
 )
 
-class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seirihq.db", null, 3) {
+class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seirihq.db", null, 4) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -101,7 +104,8 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seiri
                 "tags TEXT NOT NULL DEFAULT ''," +
                 "added_at INTEGER NOT NULL," +
                 "source TEXT NOT NULL DEFAULT 'saf'," +
-                "writable INTEGER NOT NULL DEFAULT 0)"
+                "writable INTEGER NOT NULL DEFAULT 0," +
+                "source_prompt_id INTEGER NOT NULL DEFAULT 0)"
         )
         db.execSQL(
             "CREATE TABLE trash(" +
@@ -125,6 +129,9 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seiri
         if (oldVersion < 2) {
             db.execSQL("ALTER TABLE media ADD COLUMN source TEXT NOT NULL DEFAULT 'saf'")
             db.execSQL("ALTER TABLE media ADD COLUMN writable INTEGER NOT NULL DEFAULT 0")
+        }
+        if (oldVersion < 4) {
+            db.execSQL("ALTER TABLE media ADD COLUMN source_prompt_id INTEGER NOT NULL DEFAULT 0")
         }
         if (oldVersion < 3) {
             db.execSQL(
@@ -241,7 +248,8 @@ class Repository(context: Context) {
         kind: String,
         name: String,
         source: String,
-        writable: Boolean
+        writable: Boolean,
+        sourcePromptId: Long = 0L
     ): Long {
         val v = ContentValues()
         v.put("uri", uri)
@@ -252,6 +260,7 @@ class Repository(context: Context) {
         v.put("added_at", System.currentTimeMillis())
         v.put("source", source)
         v.put("writable", if (writable) 1 else 0)
+        v.put("source_prompt_id", sourcePromptId)
         return helper.writableDatabase.insertWithOnConflict(
             "media", null, v, SQLiteDatabase.CONFLICT_IGNORE
         )
@@ -268,7 +277,8 @@ class Repository(context: Context) {
         }
         val out = ArrayList<MediaItem>()
         val c = helper.readableDatabase.rawQuery(
-            "SELECT id,uri,kind,name,status,tags,added_at,source,writable FROM media " +
+            "SELECT id,uri,kind,name,status,tags,added_at,source,writable,source_prompt_id " +
+                "FROM media " +
                 "ORDER BY added_at DESC",
             null
         )
@@ -286,7 +296,8 @@ class Repository(context: Context) {
                         addedAt = it.getLong(6),
                         projectIds = links[id] ?: emptyList(),
                         source = it.getString(7),
-                        writable = it.getInt(8) == 1
+                        writable = it.getInt(8) == 1,
+                        sourcePromptId = it.getLong(9)
                     )
                 )
             }
@@ -297,6 +308,12 @@ class Repository(context: Context) {
     fun setMediaStatus(id: Long, status: String) {
         val v = ContentValues()
         v.put("status", status)
+        helper.writableDatabase.update("media", v, "id=?", arrayOf(id.toString()))
+    }
+
+    fun setSourcePrompt(id: Long, promptId: Long) {
+        val v = ContentValues()
+        v.put("source_prompt_id", promptId)
         helper.writableDatabase.update("media", v, "id=?", arrayOf(id.toString()))
     }
 

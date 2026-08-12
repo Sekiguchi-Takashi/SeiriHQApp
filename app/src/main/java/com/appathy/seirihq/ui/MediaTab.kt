@@ -6,6 +6,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -35,6 +36,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
@@ -79,8 +81,14 @@ import com.appathy.seirihq.data.MediaItem
 import com.appathy.seirihq.data.SOURCE_SAF
 import com.appathy.seirihq.data.SOURCE_STORE
 import com.appathy.seirihq.data.Store
+import com.appathy.seirihq.data.FolderCleaner
 import com.appathy.seirihq.data.TrashFiles
 import com.appathy.seirihq.data.TrashItem
+import com.appathy.seirihq.data.ZipMaker
+import androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -91,6 +99,9 @@ private sealed class MediaRoute {
     data object Inbox : MediaRoute()
     data object Trash : MediaRoute()
     data object Cleanup : MediaRoute()
+    data object Sort : MediaRoute()
+    data object Projects : MediaRoute()
+    data class Project(val id: Long) : MediaRoute()
     data class Detail(val id: Long) : MediaRoute()
 }
 
@@ -192,7 +203,30 @@ fun MediaTab(store: Store, modifier: Modifier = Modifier) {
             modifier = modifier,
             onOpen = { route = MediaRoute.Detail(it) },
             onOpenTrash = { route = MediaRoute.Trash },
-            onOpenCleanup = { route = MediaRoute.Cleanup }
+            onOpenCleanup = { route = MediaRoute.Cleanup },
+            onOpenSort = { route = MediaRoute.Sort },
+            onOpenProjects = { route = MediaRoute.Projects }
+        )
+
+        is MediaRoute.Sort -> SortScreen(
+            store = store,
+            modifier = modifier,
+            onBack = { route = MediaRoute.Inbox }
+        )
+
+        is MediaRoute.Projects -> ProjectListScreen(
+            store = store,
+            modifier = modifier,
+            onBack = { route = MediaRoute.Inbox },
+            onOpen = { route = MediaRoute.Project(it) }
+        )
+
+        is MediaRoute.Project -> ProjectDetailScreen(
+            store = store,
+            projectId = r.id,
+            modifier = modifier,
+            onBack = { route = MediaRoute.Projects },
+            onOpenMedia = { route = MediaRoute.Detail(it) }
         )
 
         is MediaRoute.Cleanup -> CleanupScreen(
@@ -222,7 +256,9 @@ private fun InboxScreen(
     modifier: Modifier,
     onOpen: (Long) -> Unit,
     onOpenTrash: () -> Unit,
-    onOpenCleanup: () -> Unit
+    onOpenCleanup: () -> Unit,
+    onOpenSort: () -> Unit,
+    onOpenProjects: () -> Unit
 ) {
     val context = LocalContext.current
     var query by remember { mutableStateOf("") }
@@ -241,10 +277,161 @@ private fun InboxScreen(
 
     val items = store.filteredMedia(query, status)
 
+    val scope = rememberCoroutineScope()
+    var bulkBusy by remember { mutableStateOf(false) }
+    var confirmBulk by remember { mutableStateOf(false) }
+    var askBulkPin by remember { mutableStateOf(false) }
+    var pendingBulk by remember { mutableStateOf<List<Pair<MediaItem, String?>>>(emptyList()) }
+
+    fun commit(entry: Pair<MediaItem, String?>) {
+        val trashUri = entry.second
+        if (trashUri != null) store.moveToTrash(entry.first, trashUri)
+        else store.deleteMedia(entry.first.id)
+    }
+
+    val bulkDelete = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val pending = pendingBulk
+        pendingBulk = emptyList()
+        if (result.resultCode == Activity.RESULT_OK) {
+            pending.forEach { commit(it) }
+            Toast.makeText(context, "${pending.size}件を処理しました", Toast.LENGTH_SHORT).show()
+        } else {
+            pending.forEach { entry ->
+                entry.second?.let { TrashFiles.deleteFile(context, it) }
+            }
+            Toast.makeText(context, "中止しました", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun runBulk() {
+        bulkBusy = true
+        val targets = items.filter { canDeleteOriginal(context, it) }
+        val skipped = items.size - targets.size
+        scope.launch {
+            val copies = HashMap<Long, String>()
+            if (store.useTrash) {
+                withContext(Dispatchers.IO) {
+                    targets.forEach { target ->
+                        TrashFiles.copyToTrash(context, target, store.trashTreeUri)
+                            .getOrNull()?.let { copies[target.id] = it }
+                    }
+                }
+            }
+            val usable = if (store.useTrash) targets.filter { copies.containsKey(it.id) } else targets
+            val storeGroup = usable.filter {
+                it.source == SOURCE_STORE && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+            }
+            val others = usable.filterNot { storeGroup.contains(it) }
+
+            var done = 0
+            others.forEach { other ->
+                val outcome = withContext(Dispatchers.IO) {
+                    MediaFiles.deleteOriginal(context, other)
+                }
+                if (outcome is DeleteOutcome.Done) {
+                    commit(other to copies[other.id])
+                    done++
+                } else {
+                    copies[other.id]?.let { withContext(Dispatchers.IO) { TrashFiles.deleteFile(context, it) } }
+                }
+            }
+
+            val request = MediaFiles.bulkDeleteRequest(context, storeGroup)
+            bulkBusy = false
+            if (storeGroup.isNotEmpty() && request != null) {
+                pendingBulk = storeGroup.map { it to copies[it.id] }
+                bulkDelete.launch(IntentSenderRequest.Builder(request.intentSender).build())
+            } else {
+                val note = if (skipped > 0) "（${skipped}件は削除できないため残しました）" else ""
+                Toast.makeText(context, "${done}件を処理しました$note", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    var selectMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var workBusy by remember { mutableStateOf(false) }
+
+    val folderImport = rememberLauncherForActivityResult(OpenDocumentTree()) { treeUri: Uri? ->
+        if (treeUri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    treeUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
+            workBusy = true
+            scope.launch {
+                val found = withContext(Dispatchers.IO) {
+                    FolderCleaner.list(context, treeUri.toString())
+                        .filter { it.isImage || it.isVideo }
+                }
+                withContext(Dispatchers.IO) {
+                    found.forEach { entry ->
+                        store.addMedia(
+                            entry.uri,
+                            if (entry.isVideo) MEDIA_VIDEO else MEDIA_IMAGE,
+                            entry.name,
+                            SOURCE_SAF,
+                            true
+                        )
+                    }
+                }
+                store.reloadMedia()
+                workBusy = false
+                Toast.makeText(context, "${found.size}件を取り込みました", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    val zipCreator = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip")
+    ) { destination: Uri? ->
+        if (destination != null) {
+            val targets = store.media.filter { selectedIds.contains(it.id) }
+            workBusy = true
+            scope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    ZipMaker.zip(context, targets, destination)
+                }
+                workBusy = false
+                val message = result.getOrNull()?.let { "${it}件をZIPにしました" }
+                    ?: (result.exceptionOrNull()?.message ?: "ZIPを作成できませんでした")
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    fun requestAuthThenBulk() {
+        if (!store.authOnDelete) {
+            runBulk()
+            return
+        }
+        if (store.biometricEnabled && biometricAvailable(context)) {
+            promptBiometric(
+                context = context,
+                title = "まとめて削除",
+                subtitle = "${items.size}件を処理します",
+                onSuccess = { runBulk() },
+                onFail = { askBulkPin = true }
+            )
+        } else {
+            askBulkPin = true
+        }
+    }
+
     Column(modifier = modifier.fillMaxWidth()) {
         TopAppBar(
             title = { Text("素材 Inbox") },
             actions = {
+                IconButton(onClick = {
+                    selectMode = !selectMode
+                    if (!selectMode) selectedIds = emptySet()
+                }) {
+                    Icon(Icons.Default.Check, contentDescription = "選択")
+                }
                 IconButton(onClick = onOpenTrash) {
                     Icon(Icons.Default.Delete, contentDescription = "ゴミ箱")
                 }
@@ -258,7 +445,37 @@ private fun InboxScreen(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            Button(onClick = onOpenSort) { Text("交通整理 ${store.sortQueue().size}") }
+            OutlinedButton(onClick = onOpenProjects) { Text("プロジェクト") }
             OutlinedButton(onClick = onOpenCleanup) { Text("ダウンロード整理") }
+        }
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(
+                enabled = !workBusy,
+                onClick = { folderImport.launch(null) }
+            ) { Text(if (workBusy) "処理中…" else "フォルダから取り込み") }
+        }
+
+        if (selectMode) {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    enabled = selectedIds.isNotEmpty() && !workBusy,
+                    onClick = {
+                        val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())
+                        zipCreator.launch("seirihq_$stamp.zip")
+                    }
+                ) { Text("ZIPにする ${selectedIds.size}") }
+                OutlinedButton(onClick = { selectedIds = items.map { it.id }.toSet() }) {
+                    Text("表示中を全選択")
+                }
+                TextButton(onClick = { selectedIds = emptySet() }) { Text("解除") }
+            }
         }
 
         if (!granted) {
@@ -315,7 +532,7 @@ private fun InboxScreen(
                 onClick = { status = null },
                 label = { Text("すべて") }
             )
-            MEDIA_STATUSES.take(2).forEach { s ->
+            listOf(MEDIA_STATUSES[0], MEDIA_STATUSES[4]).forEach { s ->
                 FilterChip(
                     selected = status == s,
                     onClick = { status = if (status == s) null else s },
@@ -328,6 +545,23 @@ private fun InboxScreen(
             modifier = Modifier.padding(horizontal = 16.dp),
             style = MaterialTheme.typography.bodySmall
         )
+        if (status == MEDIA_STATUSES[4] && items.isNotEmpty()) {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    enabled = !bulkBusy,
+                    onClick = { confirmBulk = true }
+                ) {
+                    Text(
+                        if (bulkBusy) "処理中…"
+                        else if (store.useTrash) "${items.size}件をまとめてゴミ箱へ"
+                        else "${items.size}件をまとめて削除"
+                    )
+                }
+            }
+        }
         if (items.isEmpty()) {
             Column(modifier = Modifier.padding(24.dp)) {
                 Text("素材がありません。右上の＋から取り込んでください。")
@@ -340,15 +574,71 @@ private fun InboxScreen(
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 items(items, key = { it.id }) { item ->
-                    MediaThumb(item = item, onClick = { onOpen(item.id) })
+                    MediaThumb(
+                        item = item,
+                        selected = selectedIds.contains(item.id),
+                        onClick = {
+                            if (selectMode) {
+                                selectedIds = if (selectedIds.contains(item.id)) {
+                                    selectedIds - item.id
+                                } else {
+                                    selectedIds + item.id
+                                }
+                            } else {
+                                onOpen(item.id)
+                            }
+                        }
+                    )
                 }
             }
         }
     }
+
+    if (confirmBulk) {
+        AlertDialog(
+            onDismissRequest = { confirmBulk = false },
+            title = { Text(if (store.useTrash) "まとめてゴミ箱へ" else "まとめて削除") },
+            text = {
+                Text(
+                    if (store.useTrash) {
+                        "${items.size}件をゴミ箱へ移し、端末の原本を削除します。" +
+                            "ゴミ箱からは${store.retentionDays}日以内なら戻せます。"
+                    } else {
+                        "${items.size}件を端末から直接削除します。取り消せません。"
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmBulk = false
+                    requestAuthThenBulk()
+                }) { Text("実行する") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmBulk = false }) { Text("キャンセル") }
+            }
+        )
+    }
+
+    if (askBulkPin) {
+        PinDialog(
+            title = "まとめて削除の確認",
+            onDismiss = { askBulkPin = false },
+            onSubmit = { pin ->
+                if (store.verifyPin(pin)) {
+                    askBulkPin = false
+                    runBulk()
+                    true
+                } else {
+                    false
+                }
+            }
+        )
+    }
 }
 
 @Composable
-private fun MediaThumb(item: MediaItem, onClick: () -> Unit) {
+private fun MediaThumb(item: MediaItem, selected: Boolean = false, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .aspectRatio(1f)
@@ -356,15 +646,24 @@ private fun MediaThumb(item: MediaItem, onClick: () -> Unit) {
             .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
-        if (item.kind == MEDIA_IMAGE) {
-            AsyncImage(
-                model = item.uri,
-                contentDescription = item.name,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
+        AsyncImage(
+            model = item.uri,
+            contentDescription = item.name,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize()
+        )
+        if (item.kind != MEDIA_IMAGE) {
             Icon(Icons.Default.PlayArrow, contentDescription = "動画")
+        }
+        if (selected) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0x804CAF50)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Check, contentDescription = "選択済み")
+            }
         }
     }
 }
@@ -382,6 +681,7 @@ private fun MediaDetailScreen(store: Store, id: Long, modifier: Modifier, onBack
     var confirmRemove by remember { mutableStateOf(false) }
     var confirmOriginal by remember { mutableStateOf(false) }
     var askPin by remember { mutableStateOf(false) }
+    var askPrompt by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var pendingTrashUri by remember { mutableStateOf<String?>(null) }
 
@@ -521,7 +821,7 @@ private fun MediaDetailScreen(store: Store, id: Long, modifier: Modifier, onBack
 
             Text("状態", style = MaterialTheme.typography.labelLarge)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                MEDIA_STATUSES.take(2).forEach { s ->
+                MEDIA_STATUSES.take(3).forEach { s ->
                     FilterChip(
                         selected = item.status == s,
                         onClick = { store.setStatus(item.id, s) },
@@ -530,7 +830,7 @@ private fun MediaDetailScreen(store: Store, id: Long, modifier: Modifier, onBack
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                MEDIA_STATUSES.drop(2).forEach { s ->
+                MEDIA_STATUSES.drop(3).forEach { s ->
                     FilterChip(
                         selected = item.status == s,
                         onClick = { store.setStatus(item.id, s) },
@@ -564,6 +864,35 @@ private fun MediaDetailScreen(store: Store, id: Long, modifier: Modifier, onBack
                     )
                     Spacer(Modifier.height(8.dp))
                     Button(onClick = { store.setTags(item.id, tags.trim()) }) { Text("タグを保存") }
+                }
+            }
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("生成元プロンプト", style = MaterialTheme.typography.labelLarge)
+                    val sourcePrompt = store.prompt(item.sourcePromptId.takeIf { it > 0L })
+                    Text(
+                        sourcePrompt?.name ?: "未設定",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { askPrompt = true }) { Text("選ぶ") }
+                        if (sourcePrompt != null) {
+                            OutlinedButton(onClick = {
+                                if (store.fixedPrompts.any { it.id == sourcePrompt.id }) {
+                                    store.setActiveFixed(sourcePrompt.id)
+                                } else {
+                                    store.setActiveTemp(sourcePrompt.id)
+                                }
+                                Toast.makeText(context, "プロンプトタブに設定しました", Toast.LENGTH_SHORT)
+                                    .show()
+                            }) { Text("このプロンプトを使う") }
+                            TextButton(onClick = { store.updateSourcePrompt(item.id, 0L) }) {
+                                Text("外す")
+                            }
+                        }
+                    }
                 }
             }
 
@@ -663,6 +992,29 @@ private fun MediaDetailScreen(store: Store, id: Long, modifier: Modifier, onBack
                 } else {
                     false
                 }
+            }
+        )
+    }
+
+    if (askPrompt) {
+        AlertDialog(
+            onDismissRequest = { askPrompt = false },
+            title = { Text("生成元プロンプト") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    if (store.allPrompts().isEmpty()) {
+                        Text("プロンプトが登録されていません。")
+                    }
+                    store.allPrompts().forEach { prompt ->
+                        TextButton(onClick = {
+                            store.updateSourcePrompt(item.id, prompt.id)
+                            askPrompt = false
+                        }) { Text(prompt.name) }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { askPrompt = false }) { Text("閉じる") }
             }
         )
     }

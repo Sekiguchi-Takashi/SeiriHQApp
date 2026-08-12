@@ -47,6 +47,10 @@ class Store(context: Context) {
         private set
     var useTrash by mutableStateOf(true)
         private set
+    var lastPromptId by mutableStateOf(0L)
+        private set
+    var linkImports by mutableStateOf(true)
+        private set
 
     init {
         activeFixedId = repo.state(KEY_ACTIVE_FIXED)?.toLongOrNull()
@@ -59,6 +63,8 @@ class Store(context: Context) {
         retentionDays = repo.state(KEY_RETENTION)?.toIntOrNull() ?: DEFAULT_RETENTION_DAYS
         cleanTreeUri = repo.state(KEY_CLEAN_TREE)?.ifEmpty { null }
         useTrash = repo.state(KEY_USE_TRASH) != "0"
+        lastPromptId = repo.state(KEY_LAST_PROMPT)?.toLongOrNull() ?: 0L
+        linkImports = repo.state(KEY_LINK_IMPORTS) != "0"
         reloadProjects()
         reloadMedia()
         reloadTrash()
@@ -232,8 +238,28 @@ class Store(context: Context) {
     fun projectName(id: Long): String = projects.firstOrNull { it.id == id }?.name ?: "-"
 
     fun addMedia(uri: String, kind: String, name: String, source: String, writable: Boolean) {
-        repo.insertMedia(uri, kind, name, source, writable)
+        val promptId = if (linkImports) lastPromptId else 0L
+        repo.insertMedia(uri, kind, name, source, writable, promptId)
     }
+
+    /** コピーした時点のプロンプトを覚えておき、取り込んだ素材の生成元にする。 */
+    fun noteCopiedPrompt() {
+        val id = activeTempId ?: activeFixedId ?: 0L
+        lastPromptId = id
+        repo.setState(KEY_LAST_PROMPT, id.toString())
+    }
+
+    fun updateLinkImports(on: Boolean) {
+        linkImports = on
+        repo.setState(KEY_LINK_IMPORTS, if (on) "1" else "0")
+    }
+
+    fun updateSourcePrompt(mediaId: Long, promptId: Long) {
+        repo.setSourcePrompt(mediaId, promptId)
+        reloadMedia()
+    }
+
+    fun allPrompts(): List<PromptItem> = fixedPrompts + tempPrompts
 
     fun setPin(pin: String) {
         val salt = Passcode.newSalt()
@@ -302,6 +328,19 @@ class Store(context: Context) {
     }
 
     fun mediaItem(id: Long): MediaItem? = media.firstOrNull { it.id == id }
+
+    fun mediaOfProject(projectId: Long): List<MediaItem> =
+        media.filter { it.projectIds.contains(projectId) }
+
+    /** まだ交通整理していない素材の待ち行列。 */
+    fun sortQueue(): List<MediaItem> = media.filter { it.status == MEDIA_STATUSES[0] }
+
+    /** 交通整理で1件を処理する。プロジェクトを渡した場合は紐づけて整理済みにする。 */
+    fun sortInto(item: MediaItem, status: String, projectId: Long? = null) {
+        if (projectId != null) repo.linkProject(item.id, projectId)
+        repo.setMediaStatus(item.id, status)
+        reloadMedia()
+    }
 
     fun filteredMedia(query: String, status: String?): List<MediaItem> {
         val q = query.trim().lowercase()

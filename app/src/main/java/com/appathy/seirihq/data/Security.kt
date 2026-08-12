@@ -118,6 +118,17 @@ object MediaFiles {
         return DeleteOutcome.Unsupported("Android 10 では原本削除に対応していません")
     }
 
+    /** Android 11以上で、複数のMediaStore素材をまとめて削除する確認画面を作る。 */
+    fun bulkDeleteRequest(context: Context, items: List<MediaItem>): PendingIntent? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        if (!FilePermission.granted(context)) return null
+        val uris = items.map { Uri.parse(it.uri) }
+        if (uris.isEmpty()) return null
+        return runCatching {
+            MediaStore.createDeleteRequest(context.contentResolver, uris)
+        }.getOrNull()
+    }
+
     /** 権限がある場合に、端末内の画像・動画を新しい順に取り込む。 */
     fun scanRecent(context: Context, limit: Int): List<Triple<String, String, String>> {
         val out = ArrayList<Triple<String, String, String>>()

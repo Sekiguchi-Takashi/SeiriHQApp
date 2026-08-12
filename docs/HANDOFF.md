@@ -2,7 +2,7 @@
 
 ## 現在地
 
-v1.3。プロンプト交通整理と素材交通整理を1アプリに統合した最小構成に、
+v1.6。プロンプト交通整理と素材交通整理を1アプリに統合した最小構成に、
 パスコード＋指紋のロック、ファイル権限による原本削除、ゴミ箱を追加した。
 
 ## 構成
@@ -34,6 +34,12 @@ SeiriHQApp/
 - 素材取り込みは SAF（`OpenMultipleDocuments`）。メディア権限を要求しない
 - 動画サムネイルは coil-video。`SeiriApp`（Application）で ImageLoaderFactory を実装している
 - ダウンロード整理は DocumentsContract で直下を1クエリ取得する（DocumentFile.listFiles は遅い）
+- 交通整理のスワイプは detectDragGestures で dx/dy を積算し、大きい方の軸で判定する
+- 定期削除は WorkManager（1日1回・KEEP）。Store を介さず Repository を直接使う
+- 一括削除は MediaStore.createDeleteRequest に複数URIを渡して確認画面を1回にまとめる
+- 生成元プロンプトは media.source_prompt_id（0は未設定）。コピー時の①②を state に記録している
+- フォルダ取り込みは FolderCleaner.list を再利用し、画像・動画だけを登録する（直下のみ）
+- ZIP出力は CreateDocument("application/zip") で出力先を選ばせ、ZipOutputStream へ直接流す
 - ナビゲーションライブラリは使わず、タブ内の `sealed class` ルート + `BackHandler`
 - 指紋認証に androidx.biometric を使うため、MainActivity は `FragmentActivity`
 - パスコードは PBKDF2（20000回・ソルト付き）でハッシュ化し state テーブルへ保存
@@ -48,10 +54,7 @@ SeiriHQApp/
 
 ## 次にやること（優先順）
 
-1. プロジェクト詳細画面（素材数・未使用数・素材一覧）
-2. タグの正規化（tag / media_tag テーブル）と3種別タグ
-3. スワイプ交通整理
-4. `media.source_prompt_id` を追加し、プロンプト→生成素材の導線を作る
-5. AI（Phase 2）は接続方式を決めてから着手
-6. ゴミ箱の自動削除を WorkManager で定期実行にする（現在は起動時のみ）
-7. クラウド保存先が DocumentsProvider を出さない場合の自動アップロード手段を検討
+1. タグの正規化（tag / media_tag テーブル）と3種別タグ
+2. プロジェクト単位でプロンプトを絞り込む（プロンプトセットの前段）
+3. スワイプ方向を設定で変更できるようにする
+4. AI（Phase 2）は接続方式を決めてから着手

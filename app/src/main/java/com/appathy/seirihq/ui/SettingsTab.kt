@@ -240,6 +240,29 @@ fun SettingsTab(store: Store, modifier: Modifier = Modifier) {
 
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(12.dp)) {
+                    Text("プロンプトと素材の連携", style = MaterialTheme.typography.titleMedium)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("取り込みを直前のプロンプトに紐づける")
+                            Text(
+                                "プロンプトをコピーしたあとに取り込んだ素材へ、生成元として記録します。素材詳細から後で変更できます。",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        Switch(
+                            checked = store.linkImports,
+                            onCheckedChange = { store.updateLinkImports(it) }
+                        )
+                    }
+                }
+            }
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp)) {
                     Text("ファイル権限", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(4.dp))
                     Text(
@@ -271,6 +294,8 @@ fun SettingsTab(store: Store, modifier: Modifier = Modifier) {
                     Text("・権限がある場合は端末からの原本削除（ゴミ箱経由）")
                     Text("・ゴミ箱はアプリ内または選んだフォルダ。期限切れは自動で完全削除")
                     Text("・ダウンロード整理：選んだフォルダのapk・zipなどを直接削除")
+                    Text("・フォルダから画像・動画をまとめて取り込み")
+                    Text("・選んだ素材をZIPにまとめて書き出し")
                     Text("・プロジェクトは両機能で共通")
                     Spacer(Modifier.height(8.dp))
                     Text("AI分類・重複検出・自然言語検索は次の段階で追加します。", style = MaterialTheme.typography.bodySmall)
