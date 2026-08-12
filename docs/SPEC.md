@@ -1,4 +1,4 @@
-# 整理HQ（SeiriHQApp）統合仕様書 — v1.2
+# 整理HQ（SeiriHQApp）統合仕様書 — v1.3
 
 ## 1. 概要
 
@@ -241,6 +241,52 @@ AI安全ルールS-001（AIは原本を勝手に削除しない）は維持す�
 - コピーである以上、ゴミ箱に入れた時点では容量は減らない。減るのは完全削除の後
 - アプリ内ゴミ箱はアプリのデータ領域にあるため、アプリを削除するとゴミ箱ごと消える
 
+
+---
+
+## 4.7 ダウンロード整理（v1.3）
+
+素材ではないファイル（インストーラー、圧縮ファイルなど）を、その場で消すための画面。
+
+```text
+フォルダを選ぶ（ダウンロードフォルダなど）
+   ↓
+直下のファイルを一覧（サイズの大きい順）
+   ↓
+[インストーラーとzipを選択] で一括選択
+   ↓
+認証 → 確認
+   ↓
+直接削除（ゴミ箱を経由しない）
+```
+
+- 対象はSAFで選んだフォルダの直下のファイル。フォルダは表示しない
+- 絞り込み：すべて / apk / zip / 画像・動画
+- 選択件数と合計サイズを表示する
+- ゴミ箱を経由しないため復元できない。確認ダイアログでその旨を明示する
+
+素材のゴミ箱運用とは切り離してある。ここは「残す価値のないもの」を消す場所とする。
+
+### ゴミ箱を使わない設定
+
+設定タブの「ゴミ箱を使う」をOFFにすると、素材の削除もゴミ箱を経由せず直接削除になる。
+既定はONのままとする。
+
+---
+
+## 4.8 動画の扱い
+
+動画は取り込みの対象に含まれる。
+
+```text
+取り込み       image/* と video/* の両方を選択可能
+一括取り込み   MediaStore の画像と動画の両方
+判定           MIMEが video で始まれば動画として登録
+サムネイル     先頭付近のフレームを表示（coil-video）
+```
+
+未対応：アプリ内での動画再生、フレームサンプリングによる内容解析（Phase 2以降）。
+
 ---
 
 ## 5. データモデル（実装済み）
@@ -252,6 +298,7 @@ prompt(id, kind['fixed'|'temp'], name, description, body, created_at, updated_at
 state(key, value)                       -- active_fixed / active_temp / pin_hash / pin_salt
                                         -- biometric_enabled / auth_on_delete
                                         -- trash_tree / retention_days
+                                        -- clean_tree / use_trash
 project(id, name, created_at)
 media(id, uri UNIQUE, kind, name, status, tags, added_at, source, writable)
 media_project(media_id, project_id)     -- N:M
@@ -298,6 +345,12 @@ activeFixed / activeTemp / customPrompt → finalPrompt を都度再生成
 - 削除はすべてゴミ箱経由、失敗・キャンセル時はロールバック
 - 保持期間 7/14/30日、起動時の自動完全削除
 - 復元・共有（他アプリへのアップロード）・完全削除
+
+### v1.3（実装済み）
+
+- ダウンロード整理（フォルダ内のapk・zipなどを直接削除）
+- 「ゴミ箱を使う」設定（OFFで素材も直接削除）
+- 動画サムネイルの表示
 
 ### Phase 1
 
@@ -346,7 +399,7 @@ Kotlin + Jetpack Compose（Material 3）
 AGP 8.5.2 / Kotlin 2.0.20 / Gradle 8.9
 minSdk 26 / targetSdk 34
 SQLiteOpenHelper（アノテーション処理なし）
-Coil（画像サムネイル）
+Coil / coil-video（画像・動画サムネイル。SeiriApp で ImageLoader を差し替え）
 androidx.biometric（指紋認証。MainActivity は FragmentActivity）
 androidx.documentfile（ゴミ箱フォルダへの書き込み）
 FileProvider（アプリ内ゴミ箱のファイル共有）

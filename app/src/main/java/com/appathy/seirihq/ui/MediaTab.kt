@@ -90,6 +90,7 @@ import java.util.concurrent.TimeUnit
 private sealed class MediaRoute {
     data object Inbox : MediaRoute()
     data object Trash : MediaRoute()
+    data object Cleanup : MediaRoute()
     data class Detail(val id: Long) : MediaRoute()
 }
 
@@ -190,7 +191,14 @@ fun MediaTab(store: Store, modifier: Modifier = Modifier) {
             store = store,
             modifier = modifier,
             onOpen = { route = MediaRoute.Detail(it) },
-            onOpenTrash = { route = MediaRoute.Trash }
+            onOpenTrash = { route = MediaRoute.Trash },
+            onOpenCleanup = { route = MediaRoute.Cleanup }
+        )
+
+        is MediaRoute.Cleanup -> CleanupScreen(
+            store = store,
+            modifier = modifier,
+            onBack = { route = MediaRoute.Inbox }
         )
 
         is MediaRoute.Trash -> TrashScreen(
@@ -213,7 +221,8 @@ private fun InboxScreen(
     store: Store,
     modifier: Modifier,
     onOpen: (Long) -> Unit,
-    onOpenTrash: () -> Unit
+    onOpenTrash: () -> Unit,
+    onOpenCleanup: () -> Unit
 ) {
     val context = LocalContext.current
     var query by remember { mutableStateOf("") }
@@ -244,6 +253,13 @@ private fun InboxScreen(
                 }
             }
         )
+
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(onClick = onOpenCleanup) { Text("ダウンロード整理") }
+        }
 
         if (!granted) {
             Card(
@@ -374,9 +390,14 @@ private fun MediaDetailScreen(store: Store, id: Long, modifier: Modifier, onBack
     ) { result ->
         val trashUri = pendingTrashUri
         pendingTrashUri = null
-        if (result.resultCode == Activity.RESULT_OK && trashUri != null) {
-            store.moveToTrash(item, trashUri)
-            Toast.makeText(context, "ゴミ箱へ移動しました", Toast.LENGTH_SHORT).show()
+        if (result.resultCode == Activity.RESULT_OK) {
+            if (trashUri != null) {
+                store.moveToTrash(item, trashUri)
+                Toast.makeText(context, "ゴミ箱へ移動しました", Toast.LENGTH_SHORT).show()
+            } else {
+                store.deleteMedia(item.id)
+                Toast.makeText(context, "削除しました", Toast.LENGTH_SHORT).show()
+            }
             onBack()
         } else if (trashUri != null) {
             TrashFiles.deleteFile(context, trashUri)
@@ -387,6 +408,29 @@ private fun MediaDetailScreen(store: Store, id: Long, modifier: Modifier, onBack
     fun runDelete() {
         busy = true
         scope.launch {
+            if (!store.useTrash) {
+                val direct = withContext(Dispatchers.IO) { MediaFiles.deleteOriginal(context, item) }
+                busy = false
+                when (direct) {
+                    is DeleteOutcome.Done -> {
+                        store.deleteMedia(item.id)
+                        Toast.makeText(context, "削除しました", Toast.LENGTH_SHORT).show()
+                        onBack()
+                    }
+
+                    is DeleteOutcome.NeedsConfirm -> {
+                        pendingTrashUri = null
+                        systemDelete.launch(
+                            IntentSenderRequest.Builder(direct.intent.intentSender).build()
+                        )
+                    }
+
+                    is DeleteOutcome.Unsupported -> {
+                        Toast.makeText(context, direct.reason, Toast.LENGTH_LONG).show()
+                    }
+                }
+                return@launch
+            }
             val copied = withContext(Dispatchers.IO) {
                 TrashFiles.copyToTrash(context, item, store.trashTreeUri)
             }
@@ -533,14 +577,24 @@ private fun MediaDetailScreen(store: Store, id: Long, modifier: Modifier, onBack
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !busy,
                     onClick = { confirmOriginal = true }
-                ) { Text(if (busy) "移動中…" else "ゴミ箱へ移動（端末から削除）") }
+                ) {
+                    Text(
+                        if (busy) "処理中…"
+                        else if (store.useTrash) "ゴミ箱へ移動（端末から削除）"
+                        else "端末から直接削除"
+                    )
+                }
                 if (busy) {
                     CircularProgressIndicator()
                 }
                 Text(
-                    "原本はゴミ箱へコピーしてから端末で削除します。ゴミ箱の保存先は" +
-                        (if (store.trashTreeUri.isNullOrEmpty()) "アプリ内" else "選択したフォルダ") +
-                        "、保持期間は${store.retentionDays}日です。",
+                    if (store.useTrash) {
+                        "原本はゴミ箱へコピーしてから端末で削除します。ゴミ箱の保存先は" +
+                            (if (store.trashTreeUri.isNullOrEmpty()) "アプリ内" else "選択したフォルダ") +
+                            "、保持期間は${store.retentionDays}日です。"
+                    } else {
+                        "設定でゴミ箱を使わない指定になっています。原本は復元できません。"
+                    },
                     style = MaterialTheme.typography.bodySmall
                 )
             } else {
@@ -574,18 +628,22 @@ private fun MediaDetailScreen(store: Store, id: Long, modifier: Modifier, onBack
     if (confirmOriginal) {
         AlertDialog(
             onDismissRequest = { confirmOriginal = false },
-            title = { Text("ゴミ箱へ移動") },
+            title = { Text(if (store.useTrash) "ゴミ箱へ移動" else "直接削除") },
             text = {
                 Text(
-                    "「${item.name}」をゴミ箱へ移し、端末の原本を削除します。" +
-                        "ゴミ箱からは${store.retentionDays}日以内なら戻せます。"
+                    if (store.useTrash) {
+                        "「${item.name}」をゴミ箱へ移し、端末の原本を削除します。" +
+                            "ゴミ箱からは${store.retentionDays}日以内なら戻せます。"
+                    } else {
+                        "「${item.name}」を端末から直接削除します。取り消せません。"
+                    }
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
                     confirmOriginal = false
                     requestAuthThenDelete()
-                }) { Text("移動する") }
+                }) { Text(if (store.useTrash) "移動する" else "削除する") }
             },
             dismissButton = {
                 TextButton(onClick = { confirmOriginal = false }) { Text("キャンセル") }

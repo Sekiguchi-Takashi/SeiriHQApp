@@ -43,6 +43,10 @@ class Store(context: Context) {
         private set
     var retentionDays by mutableStateOf(DEFAULT_RETENTION_DAYS)
         private set
+    var cleanTreeUri by mutableStateOf<String?>(null)
+        private set
+    var useTrash by mutableStateOf(true)
+        private set
 
     init {
         activeFixedId = repo.state(KEY_ACTIVE_FIXED)?.toLongOrNull()
@@ -53,6 +57,8 @@ class Store(context: Context) {
         authOnDelete = repo.state(KEY_AUTH_ON_DELETE) != "0"
         trashTreeUri = repo.state(KEY_TRASH_TREE)?.ifEmpty { null }
         retentionDays = repo.state(KEY_RETENTION)?.toIntOrNull() ?: DEFAULT_RETENTION_DAYS
+        cleanTreeUri = repo.state(KEY_CLEAN_TREE)?.ifEmpty { null }
+        useTrash = repo.state(KEY_USE_TRASH) != "0"
         reloadProjects()
         reloadMedia()
         reloadTrash()
@@ -66,6 +72,16 @@ class Store(context: Context) {
     fun setTrashTree(uri: String?) {
         trashTreeUri = uri
         repo.setState(KEY_TRASH_TREE, uri ?: "")
+    }
+
+    fun updateCleanTree(uri: String?) {
+        cleanTreeUri = uri
+        repo.setState(KEY_CLEAN_TREE, uri ?: "")
+    }
+
+    fun updateUseTrash(on: Boolean) {
+        useTrash = on
+        repo.setState(KEY_USE_TRASH, if (on) "1" else "0")
     }
 
     fun updateRetentionDays(days: Int) {

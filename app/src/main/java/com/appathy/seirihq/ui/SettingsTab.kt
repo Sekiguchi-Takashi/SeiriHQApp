@@ -178,10 +178,24 @@ fun SettingsTab(store: Store, modifier: Modifier = Modifier) {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text("ゴミ箱", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "削除した原本は、まずゴミ箱へコピーしてから端末で削除します。",
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("ゴミ箱を使う")
+                            Text(
+                                if (store.useTrash) "削除した原本は一度ゴミ箱へ入ります。"
+                                else "素材の削除も即座に消えます。復元できません。",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        Switch(
+                            checked = store.useTrash,
+                            onCheckedChange = { store.updateUseTrash(it) }
+                        )
+                    }
                     Spacer(Modifier.height(8.dp))
                     Text(
                         "保存先：" + (
@@ -256,6 +270,7 @@ fun SettingsTab(store: Store, modifier: Modifier = Modifier) {
                     Text("・素材はパスコードと指紋で保護")
                     Text("・権限がある場合は端末からの原本削除（ゴミ箱経由）")
                     Text("・ゴミ箱はアプリ内または選んだフォルダ。期限切れは自動で完全削除")
+                    Text("・ダウンロード整理：選んだフォルダのapk・zipなどを直接削除")
                     Text("・プロジェクトは両機能で共通")
                     Spacer(Modifier.height(8.dp))
                     Text("AI分類・重複検出・自然言語検索は次の段階で追加します。", style = MaterialTheme.typography.bodySmall)

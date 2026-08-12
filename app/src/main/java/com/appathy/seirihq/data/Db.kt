@@ -27,6 +27,8 @@ const val SOURCE_STORE = "mediastore"
 const val SOURCE_TRASH = "trash"
 
 const val KEY_TRASH_TREE = "trash_tree"
+const val KEY_CLEAN_TREE = "clean_tree"
+const val KEY_USE_TRASH = "use_trash"
 const val KEY_RETENTION = "retention_days"
 const val DEFAULT_RETENTION_DAYS = 14
 
