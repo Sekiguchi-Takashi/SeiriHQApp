@@ -1,13 +1,17 @@
 package com.appathy.seirihq.data
 
 import android.content.Context
+import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
+private const val LOCK_GRACE_MS = 30000L
+
 class Store(context: Context) {
 
     private val repo = Repository(context)
+    private val appContext = context.applicationContext
 
     var fixedPrompts by mutableStateOf<List<PromptItem>>(emptyList())
         private set
@@ -19,17 +23,99 @@ class Store(context: Context) {
         private set
     var customPrompt by mutableStateOf("")
 
+    var pinSet by mutableStateOf(false)
+        private set
+    var biometricEnabled by mutableStateOf(false)
+        private set
+    var authOnDelete by mutableStateOf(true)
+        private set
+    var unlocked by mutableStateOf(false)
+        private set
+    private var backgroundAt = 0L
+
     var projects by mutableStateOf<List<Project>>(emptyList())
         private set
     var media by mutableStateOf<List<MediaItem>>(emptyList())
+        private set
+    var trash by mutableStateOf<List<TrashItem>>(emptyList())
+        private set
+    var trashTreeUri by mutableStateOf<String?>(null)
+        private set
+    var retentionDays by mutableStateOf(DEFAULT_RETENTION_DAYS)
         private set
 
     init {
         activeFixedId = repo.state(KEY_ACTIVE_FIXED)?.toLongOrNull()
         activeTempId = repo.state(KEY_ACTIVE_TEMP)?.toLongOrNull()
         reloadPrompts()
+        pinSet = !repo.state(KEY_PIN_HASH).isNullOrEmpty()
+        biometricEnabled = repo.state(KEY_BIOMETRIC) == "1"
+        authOnDelete = repo.state(KEY_AUTH_ON_DELETE) != "0"
+        trashTreeUri = repo.state(KEY_TRASH_TREE)?.ifEmpty { null }
+        retentionDays = repo.state(KEY_RETENTION)?.toIntOrNull() ?: DEFAULT_RETENTION_DAYS
         reloadProjects()
         reloadMedia()
+        reloadTrash()
+        purgeExpired()
+    }
+
+    fun reloadTrash() {
+        trash = repo.trash()
+    }
+
+    fun setTrashTree(uri: String?) {
+        trashTreeUri = uri
+        repo.setState(KEY_TRASH_TREE, uri ?: "")
+    }
+
+    fun setRetentionDays(days: Int) {
+        retentionDays = days
+        repo.setState(KEY_RETENTION, days.toString())
+    }
+
+    /** 原本をゴミ箱へ移したあと、素材一覧から取り除く。 */
+    fun moveToTrash(item: MediaItem, trashUri: String) {
+        val expire = System.currentTimeMillis() + retentionDays * 24L * 60L * 60L * 1000L
+        repo.insertTrash(item, trashUri, expire)
+        repo.deleteMedia(item.id)
+        reloadMedia()
+        reloadTrash()
+    }
+
+    /** ゴミ箱の実ファイルは残したまま、素材一覧へ戻す。 */
+    fun restoreFromTrash(item: TrashItem) {
+        val source = if (Uri.parse(item.uri).scheme == "file") SOURCE_TRASH else SOURCE_SAF
+        repo.insertMedia(item.uri, item.kind, item.name, source, true)
+        repo.deleteTrashRow(item.id)
+        reloadMedia()
+        reloadTrash()
+    }
+
+    fun purgeOne(item: TrashItem) {
+        TrashFiles.deleteFile(appContext, item.uri)
+        repo.deleteTrashRow(item.id)
+        reloadTrash()
+    }
+
+    fun emptyTrash() {
+        repo.trash().forEach { item ->
+            TrashFiles.deleteFile(appContext, item.uri)
+            repo.deleteTrashRow(item.id)
+        }
+        reloadTrash()
+    }
+
+    /** 保持期間を過ぎたものを完全削除する。起動時に実行される。 */
+    fun purgeExpired(): Int {
+        val now = System.currentTimeMillis()
+        var count = 0
+        repo.trash().filter { it.expireAt <= now }.forEach { item ->
+            TrashFiles.deleteFile(appContext, item.uri)
+            repo.deleteTrashRow(item.id)
+            count++
+        }
+        if (count > 0) reloadTrash()
+        return count
     }
 
     fun reloadPrompts() {
@@ -124,12 +210,59 @@ class Store(context: Context) {
         repo.deleteProject(id)
         reloadProjects()
         reloadMedia()
+        reloadTrash()
     }
 
     fun projectName(id: Long): String = projects.firstOrNull { it.id == id }?.name ?: "-"
 
-    fun addMedia(uri: String, kind: String, name: String) {
-        repo.insertMedia(uri, kind, name)
+    fun addMedia(uri: String, kind: String, name: String, source: String, writable: Boolean) {
+        repo.insertMedia(uri, kind, name, source, writable)
+    }
+
+    fun setPin(pin: String) {
+        val salt = Passcode.newSalt()
+        repo.setState(KEY_PIN_SALT, salt)
+        repo.setState(KEY_PIN_HASH, Passcode.hash(pin, salt))
+        pinSet = true
+        unlocked = true
+    }
+
+    fun verifyPin(pin: String): Boolean {
+        val salt = repo.state(KEY_PIN_SALT) ?: return false
+        val hash = repo.state(KEY_PIN_HASH) ?: return false
+        val ok = Passcode.hash(pin, salt) == hash
+        if (ok) unlocked = true
+        return ok
+    }
+
+    fun unlock() {
+        unlocked = true
+    }
+
+    /** 画面遷移や取り込みで一時的に離れただけならロックしない。 */
+    fun markBackground() {
+        backgroundAt = System.currentTimeMillis()
+    }
+
+    fun applyLockTimeout() {
+        if (!unlocked) return
+        if (backgroundAt == 0L) return
+        if (System.currentTimeMillis() - backgroundAt > LOCK_GRACE_MS) unlocked = false
+        backgroundAt = 0L
+    }
+
+    fun lock() {
+        unlocked = false
+    }
+
+    fun setBiometric(on: Boolean) {
+        biometricEnabled = on
+        repo.setState(KEY_BIOMETRIC, if (on) "1" else "0")
+    }
+
+    fun setAuthOnDelete(on: Boolean) {
+        authOnDelete = on
+        repo.setState(KEY_AUTH_ON_DELETE, if (on) "1" else "0")
     }
 
     fun setStatus(id: Long, status: String) {

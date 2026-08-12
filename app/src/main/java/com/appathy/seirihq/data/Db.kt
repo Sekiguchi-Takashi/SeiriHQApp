@@ -14,9 +14,21 @@ const val MAX_TEMP = 20
 
 const val KEY_ACTIVE_FIXED = "active_fixed"
 const val KEY_ACTIVE_TEMP = "active_temp"
+const val KEY_PIN_HASH = "pin_hash"
+const val KEY_PIN_SALT = "pin_salt"
+const val KEY_BIOMETRIC = "biometric_enabled"
+const val KEY_AUTH_ON_DELETE = "auth_on_delete"
 
 const val MEDIA_IMAGE = "image"
 const val MEDIA_VIDEO = "video"
+
+const val SOURCE_SAF = "saf"
+const val SOURCE_STORE = "mediastore"
+const val SOURCE_TRASH = "trash"
+
+const val KEY_TRASH_TREE = "trash_tree"
+const val KEY_RETENTION = "retention_days"
+const val DEFAULT_RETENTION_DAYS = 14
 
 val MEDIA_STATUSES = listOf("未整理", "整理済み", "保留", "アーカイブ")
 
@@ -42,10 +54,22 @@ data class MediaItem(
     val status: String,
     val tags: String,
     val addedAt: Long,
-    val projectIds: List<Long>
+    val projectIds: List<Long>,
+    val source: String,
+    val writable: Boolean
 )
 
-class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seirihq.db", null, 1) {
+data class TrashItem(
+    val id: Long,
+    val name: String,
+    val kind: String,
+    val uri: String,
+    val tags: String,
+    val deletedAt: Long,
+    val expireAt: Long
+)
+
+class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seirihq.db", null, 3) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -73,7 +97,19 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seiri
                 "name TEXT NOT NULL," +
                 "status TEXT NOT NULL," +
                 "tags TEXT NOT NULL DEFAULT ''," +
-                "added_at INTEGER NOT NULL)"
+                "added_at INTEGER NOT NULL," +
+                "source TEXT NOT NULL DEFAULT 'saf'," +
+                "writable INTEGER NOT NULL DEFAULT 0)"
+        )
+        db.execSQL(
+            "CREATE TABLE trash(" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "name TEXT NOT NULL," +
+                "kind TEXT NOT NULL," +
+                "uri TEXT NOT NULL," +
+                "tags TEXT NOT NULL DEFAULT ''," +
+                "deleted_at INTEGER NOT NULL," +
+                "expire_at INTEGER NOT NULL)"
         )
         db.execSQL(
             "CREATE TABLE media_project(" +
@@ -84,6 +120,22 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seiri
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE media ADD COLUMN source TEXT NOT NULL DEFAULT 'saf'")
+            db.execSQL("ALTER TABLE media ADD COLUMN writable INTEGER NOT NULL DEFAULT 0")
+        }
+        if (oldVersion < 3) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS trash(" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "name TEXT NOT NULL," +
+                    "kind TEXT NOT NULL," +
+                    "uri TEXT NOT NULL," +
+                    "tags TEXT NOT NULL DEFAULT ''," +
+                    "deleted_at INTEGER NOT NULL," +
+                    "expire_at INTEGER NOT NULL)"
+            )
+        }
     }
 }
 
@@ -182,7 +234,13 @@ class Repository(context: Context) {
         db.delete("project", "id=?", arrayOf(id.toString()))
     }
 
-    fun insertMedia(uri: String, kind: String, name: String): Long {
+    fun insertMedia(
+        uri: String,
+        kind: String,
+        name: String,
+        source: String,
+        writable: Boolean
+    ): Long {
         val v = ContentValues()
         v.put("uri", uri)
         v.put("kind", kind)
@@ -190,6 +248,8 @@ class Repository(context: Context) {
         v.put("status", MEDIA_STATUSES[0])
         v.put("tags", "")
         v.put("added_at", System.currentTimeMillis())
+        v.put("source", source)
+        v.put("writable", if (writable) 1 else 0)
         return helper.writableDatabase.insertWithOnConflict(
             "media", null, v, SQLiteDatabase.CONFLICT_IGNORE
         )
@@ -206,7 +266,9 @@ class Repository(context: Context) {
         }
         val out = ArrayList<MediaItem>()
         val c = helper.readableDatabase.rawQuery(
-            "SELECT id,uri,kind,name,status,tags,added_at FROM media ORDER BY added_at DESC", null
+            "SELECT id,uri,kind,name,status,tags,added_at,source,writable FROM media " +
+                "ORDER BY added_at DESC",
+            null
         )
         c.use {
             while (it.moveToNext()) {
@@ -220,7 +282,9 @@ class Repository(context: Context) {
                         status = it.getString(4),
                         tags = it.getString(5),
                         addedAt = it.getLong(6),
-                        projectIds = links[id] ?: emptyList()
+                        projectIds = links[id] ?: emptyList(),
+                        source = it.getString(7),
+                        writable = it.getInt(8) == 1
                     )
                 )
             }
@@ -255,6 +319,45 @@ class Repository(context: Context) {
             "media_id=? AND project_id=?",
             arrayOf(mediaId.toString(), projectId.toString())
         )
+    }
+
+    fun insertTrash(item: MediaItem, uri: String, expireAt: Long): Long {
+        val v = ContentValues()
+        v.put("name", item.name)
+        v.put("kind", item.kind)
+        v.put("uri", uri)
+        v.put("tags", item.tags)
+        v.put("deleted_at", System.currentTimeMillis())
+        v.put("expire_at", expireAt)
+        return helper.writableDatabase.insert("trash", null, v)
+    }
+
+    fun trash(): List<TrashItem> {
+        val out = ArrayList<TrashItem>()
+        val c = helper.readableDatabase.rawQuery(
+            "SELECT id,name,kind,uri,tags,deleted_at,expire_at FROM trash ORDER BY deleted_at DESC",
+            null
+        )
+        c.use {
+            while (it.moveToNext()) {
+                out.add(
+                    TrashItem(
+                        id = it.getLong(0),
+                        name = it.getString(1),
+                        kind = it.getString(2),
+                        uri = it.getString(3),
+                        tags = it.getString(4),
+                        deletedAt = it.getLong(5),
+                        expireAt = it.getLong(6)
+                    )
+                )
+            }
+        }
+        return out
+    }
+
+    fun deleteTrashRow(id: Long) {
+        helper.writableDatabase.delete("trash", "id=?", arrayOf(id.toString()))
     }
 
     fun deleteMedia(id: Long) {

@@ -1,4 +1,4 @@
-# 整理HQ（SeiriHQApp）統合仕様書
+# 整理HQ（SeiriHQApp）統合仕様書 — v1.2
 
 ## 1. 概要
 
@@ -109,23 +109,159 @@ Projectを共通エンティティにしたことで、将来「このプロジ�
 これにより、軽量なプロンプト側が重い権限を背負わずに済む。
 MediaStore全体スキャンが必要になる段階（自動取り込み・重複検出）で、初めて権限を追加する。
 
+
+---
+
+## 4.5 セキュリティと権限（v1.1）
+
+### ロック
+
+素材はアプリ内でロックする。プロンプト側はロックしない。
+
+```text
+素材タブを開く
+   ↓
+パスコード未設定 → 設定を要求（4〜6桁・必須）
+パスコード設定済 → 入力、または指紋で解除
+   ↓
+解除された状態で利用
+   ↓
+30秒を超えてアプリを離れる → 再ロック
+```
+
+- パスコードは PBKDF2WithHmacSHA256（20000回・ソルト付き）でハッシュ化して保存。平文は保持しない
+- 指紋は任意。設定でONにすると解除画面に「指紋で解除」が出る（BIOMETRIC_WEAK）
+- 取り込みや削除確認で一時的にアプリを離れる場合に再入力させないため、30秒の猶予を設ける
+- 設定タブから「今すぐロックする」「パスコード変更」が可能。変更には現在のパスコードが必要
+
+### 権限による機能差
+
+```text
+権限なし（既定）
+├─ 閲覧
+├─ 取り込み（SAF）
+└─ 一覧から外す（原本は残る）
+
+権限あり
+├─ 上記すべて
+├─ 端末から一括取り込み（新しい順200件）
+└─ 端末から原本を削除
+```
+
+要求する権限：
+
+```text
+Android 13以上 : READ_MEDIA_IMAGES / READ_MEDIA_VIDEO
+Android 10〜12 : READ_EXTERNAL_STORAGE
+Android 9以下  : READ_EXTERNAL_STORAGE / WRITE_EXTERNAL_STORAGE
+指紋           : USE_BIOMETRIC
+```
+
+### 原本削除の経路
+
+```text
+取り込み元がSAF
+└─ 書き込み権限が取れている場合のみ DocumentsContract.deleteDocument
+
+取り込み元がMediaStore
+├─ Android 11以上 : MediaStore.createDeleteRequest（システム確認画面）
+├─ Android 9以下  : ContentResolver.delete
+└─ Android 10     : 非対応（一覧から外すのみ）
+```
+
+削除の前に認証を要求する（既定ON、設定で変更可）。
+指紋がONなら指紋、失敗またはOFFならパスコードを求める。
+そのうえで確認ダイアログを出し、取り消せない操作であることを明示する。
+
+### 削除の2種類
+
+```text
+一覧から外す   アプリの登録だけ削除。原本は残る
+端末から削除   原本を削除。取り消せない
+```
+
+AI安全ルールS-001（AIは原本を勝手に削除しない）は維持する。
+原本削除は常にユーザーの明示操作＋認証を経由する。
+
+
+---
+
+## 4.6 ゴミ箱（v1.2）
+
+原本の削除は必ずゴミ箱を経由する。AI安全ルールS-001（原本を勝手に削除しない）の実装上の裏づけでもある。
+
+```text
+[ゴミ箱へ移動]
+   ↓
+認証（指紋 or パスコード）
+   ↓
+確認ダイアログ
+   ↓
+ゴミ箱へコピー          ← ここで失敗したら原本は消さない
+   ↓
+端末の原本を削除
+   ↓
+ゴミ箱に保持（既定14日）
+   ↓
+期限切れ → アプリ起動時に完全削除
+```
+
+コピーが失敗した場合、システムの削除確認をキャンセルした場合は、コピーを消して元の状態へ戻す。
+
+### 保存先
+
+```text
+アプリ内（既定）
+└─ /data/data/<app>/files/trash
+
+選んだフォルダ（SAF）
+└─ ダウンロード配下、SDカード、
+   クラウドがフォルダとして見える場合はその中
+```
+
+設定タブの「フォルダを選ぶ」でフォルダを指定すると、以後そこへ保存する。
+フォルダ選択画面にクラウドのアプリが表示される場合は、その中を直接ゴミ箱にできる。
+表示されない場合は、そのクラウドが同期対象にしているローカルフォルダを選ぶ。
+
+### 保持と操作
+
+```text
+保持期間  7日 / 14日（既定）/ 30日
+自動削除  アプリ起動時に期限切れを完全削除
+手動操作  復元 / 送る（他アプリへアップロード）/ 完全削除 / すべて空にする
+```
+
+- 復元：アプリの一覧へ戻す。ファイルはゴミ箱の場所に残り、その場所を参照する
+  （原本は端末から消えているため、元の場所へは戻せない）
+- 送る：共有インテントで他アプリへ渡す。クラウドアプリを選べば手動アップロードになる
+  （アプリ内ゴミ箱のファイルは FileProvider 経由で渡す）
+
+### 注意
+
+- コピーである以上、ゴミ箱に入れた時点では容量は減らない。減るのは完全削除の後
+- アプリ内ゴミ箱はアプリのデータ領域にあるため、アプリを削除するとゴミ箱ごと消える
+
 ---
 
 ## 5. データモデル（実装済み）
 
-SQLite（`seirihq.db` / version 1）。両機能で1つのDBを共有する。
+SQLite（`seirihq.db` / version 3）。両機能で1つのDBを共有する。
 
 ```text
 prompt(id, kind['fixed'|'temp'], name, description, body, created_at, updated_at)
-state(key, value)                       -- active_fixed / active_temp
+state(key, value)                       -- active_fixed / active_temp / pin_hash / pin_salt
+                                        -- biometric_enabled / auth_on_delete
+                                        -- trash_tree / retention_days
 project(id, name, created_at)
-media(id, uri UNIQUE, kind, name, status, tags, added_at)
+media(id, uri UNIQUE, kind, name, status, tags, added_at, source, writable)
 media_project(media_id, project_id)     -- N:M
+trash(id, name, kind, uri, tags, deleted_at, expire_at)
 ```
 
 - ③任意入力は永続保存しない（メモリ上のみ）
 - タグは現状カンマ区切りのTEXT。Phase 1で `tag` / `media_tag` へ正規化する
 - メディアは参照（URI）で保持し、物理コピーを作らない
+- `source` は取り込み元（`saf` / `mediastore`）、`writable` は原本を削除できるかの判定に使う
 
 ---
 
@@ -148,6 +284,20 @@ activeFixed / activeTemp / customPrompt → finalPrompt を都度再生成
 - 2機能の同居、共通DB、共通Project
 - プロンプト管理・合成・コピー・②高速切替
 - 素材取り込み・Inbox・状態・タグ・プロジェクト紐づけ・基本検索
+
+### v1.1（実装済み）
+
+- パスコードロック（必須）＋指紋認証（任意）
+- ファイル権限の付与と、権限による機能差
+- 端末からの原本削除（認証＋確認ダイアログ付き）
+- 権限がある場合の一括取り込み
+
+### v1.2（実装済み）
+
+- ゴミ箱（アプリ内 / 選んだフォルダ）
+- 削除はすべてゴミ箱経由、失敗・キャンセル時はロールバック
+- 保持期間 7/14/30日、起動時の自動完全削除
+- 復元・共有（他アプリへのアップロード）・完全削除
 
 ### Phase 1
 
@@ -197,6 +347,9 @@ AGP 8.5.2 / Kotlin 2.0.20 / Gradle 8.9
 minSdk 26 / targetSdk 34
 SQLiteOpenHelper（アノテーション処理なし）
 Coil（画像サムネイル）
+androidx.biometric（指紋認証。MainActivity は FragmentActivity）
+androidx.documentfile（ゴミ箱フォルダへの書き込み）
+FileProvider（アプリ内ゴミ箱のファイル共有）
 GitHub Actions で assembleDebug
 app/debug.keystore を固定（上書きインストール可）
 ```
