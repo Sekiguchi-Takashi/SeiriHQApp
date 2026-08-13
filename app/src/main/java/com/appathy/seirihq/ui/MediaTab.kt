@@ -284,7 +284,7 @@ private fun InboxScreen(
         granted = FilePermission.granted(context)
     }
 
-    val items = store.filteredMedia(query, status)
+    val items = store.filteredMedia(query, status, store.pinnedOnly)
 
     val scope = rememberCoroutineScope()
     var bulkBusy by remember { mutableStateOf(false) }
@@ -360,6 +360,7 @@ private fun InboxScreen(
     }
 
     var selectMode by remember { mutableStateOf(false) }
+    var confirmArchive by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var workBusy by remember { mutableStateOf(false) }
     var zipProgress by remember { mutableStateOf("") }
@@ -475,6 +476,26 @@ private fun InboxScreen(
                 OutlinedButton(onClick = { selectedIds = items.map { it.id }.toSet() }) {
                     Text("全選択")
                 }
+                OutlinedButton(
+                    enabled = selectedIds.isNotEmpty(),
+                    onClick = {
+                        store.setPinnedFor(selectedIds, true)
+                        Toast.makeText(context, "${selectedIds.size}件を常用にしました", Toast.LENGTH_SHORT)
+                            .show()
+                        selectedIds = emptySet()
+                    }
+                ) { Text("★ 常用にする") }
+                OutlinedButton(
+                    enabled = selectedIds.isNotEmpty(),
+                    onClick = {
+                        store.setPinnedFor(selectedIds, false)
+                        selectedIds = emptySet()
+                    }
+                ) { Text("常用から外す") }
+                OutlinedButton(
+                    enabled = selectedIds.isNotEmpty(),
+                    onClick = { confirmArchive = true }
+                ) { Text("アーカイブ") }
                 TextButton(onClick = { selectedIds = emptySet() }) { Text("解除") }
                 TextButton(onClick = {
                     selectMode = false
@@ -531,6 +552,24 @@ private fun InboxScreen(
         }
 
         if (!selectMode) {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = store.pinnedOnly,
+                    onClick = {
+                        store.updatePinnedOnly(true)
+                        status = null
+                    },
+                    label = { Text("常用 ${store.pinnedCount()}") }
+                )
+                FilterChip(
+                    selected = !store.pinnedOnly,
+                    onClick = { store.updatePinnedOnly(false) },
+                    label = { Text("すべて") }
+                )
+            }
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
@@ -540,23 +579,25 @@ private fun InboxScreen(
                 label = { Text("検索（名前・タグ・プロジェクト）") },
                 singleLine = true
             )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilterChip(
-                    selected = status == null,
-                    onClick = { status = null },
-                    label = { Text("すべて") }
-                )
-                listOf(MEDIA_STATUSES[0], MEDIA_STATUSES[4]).forEach { s ->
+            if (!store.pinnedOnly) {
+                FlowRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     FilterChip(
-                        selected = status == s,
-                        onClick = { status = if (status == s) null else s },
-                        label = { Text(s) }
+                        selected = status == null,
+                        onClick = { status = null },
+                        label = { Text("状態すべて") }
                     )
+                    listOf(MEDIA_STATUSES[0], MEDIA_STATUSES[3], MEDIA_STATUSES[4]).forEach { s ->
+                        FilterChip(
+                            selected = status == s,
+                            onClick = { status = if (status == s) null else s },
+                            label = { Text(s) }
+                        )
+                    }
                 }
             }
         }
@@ -584,7 +625,15 @@ private fun InboxScreen(
         }
         if (items.isEmpty()) {
             Column(modifier = Modifier.padding(24.dp)) {
-                Text("素材がありません。右上の＋から取り込んでください。")
+                if (store.pinnedOnly) {
+                    Text("常用の素材がありません。")
+                    Text(
+                        "「すべて」に切り替え、右上のチェックで選択して「★ 常用にする」を押すと、ここに並びます。素材詳細の★でも登録できます。",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else {
+                    Text("素材がありません。右上の＋から取り込んでください。")
+                }
             }
         } else {
             LazyVerticalGrid(
@@ -597,6 +646,13 @@ private fun InboxScreen(
                     MediaThumb(
                         item = item,
                         selected = selectedIds.contains(item.id),
+                        showCopy = !selectMode,
+                        onCopy = {
+                            val result = ImageClip.copy(context, item)
+                            val message = if (result.isSuccess) "コピーしました"
+                            else (result.exceptionOrNull()?.message ?: "コピーできませんでした")
+                            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                        },
                         onClick = {
                             if (selectMode) {
                                 selectedIds = if (selectedIds.contains(item.id)) {
@@ -612,6 +668,31 @@ private fun InboxScreen(
                 }
             }
         }
+    }
+
+    if (confirmArchive) {
+        AlertDialog(
+            onDismissRequest = { confirmArchive = false },
+            title = { Text("アーカイブ") },
+            text = {
+                Text(
+                    "${selectedIds.size}件をアーカイブします。ファイルは消えません。" +
+                        "「すべて」でアーカイブを選べば、いつでも戻せます。"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    store.archive(selectedIds)
+                    Toast.makeText(context, "${selectedIds.size}件をアーカイブしました", Toast.LENGTH_SHORT)
+                        .show()
+                    selectedIds = emptySet()
+                    confirmArchive = false
+                }) { Text("アーカイブ") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmArchive = false }) { Text("キャンセル") }
+            }
+        )
     }
 
     if (confirmBulk) {
@@ -658,7 +739,13 @@ private fun InboxScreen(
 }
 
 @Composable
-private fun MediaThumb(item: MediaItem, selected: Boolean = false, onClick: () -> Unit) {
+private fun MediaThumb(
+    item: MediaItem,
+    selected: Boolean = false,
+    showCopy: Boolean = false,
+    onCopy: () -> Unit = {},
+    onClick: () -> Unit
+) {
     Box(
         modifier = Modifier
             .aspectRatio(1f)
@@ -674,6 +761,29 @@ private fun MediaThumb(item: MediaItem, selected: Boolean = false, onClick: () -
         )
         if (item.kind != MEDIA_IMAGE) {
             Icon(Icons.Default.PlayArrow, contentDescription = "動画")
+        }
+        if (item.pinned) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(4.dp)
+                    .background(Color(0xCCFFFFFF))
+                    .padding(horizontal = 4.dp)
+            ) {
+                Text("★", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        if (showCopy) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(4.dp)
+                    .background(Color(0xCC000000))
+                    .clickable { onCopy() }
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Text("コピー", color = Color.White, style = MaterialTheme.typography.bodySmall)
+            }
         }
         if (selected) {
             Box(
@@ -852,6 +962,14 @@ private fun MediaDetailScreen(store: Store, id: Long, modifier: Modifier, onBack
                 OutlinedButton(onClick = { shareUri(context, item.uri, item.kind) }) {
                     Text("送る")
                 }
+                OutlinedButton(onClick = {
+                    store.togglePinned(item)
+                    Toast.makeText(
+                        context,
+                        if (item.pinned) "常用から外しました" else "常用にしました",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }) { Text(if (item.pinned) "★ 常用を解除" else "☆ 常用にする") }
             }
             Text(
                 "コピーしたあと、生成AIアプリの入力欄で長押しして貼り付けてください。貼り付けに対応していないアプリでは「送る」を使ってください。",

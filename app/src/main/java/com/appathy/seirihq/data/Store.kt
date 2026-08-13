@@ -51,6 +51,8 @@ class Store(context: Context) {
         private set
     var linkImports by mutableStateOf(true)
         private set
+    var pinnedOnly by mutableStateOf(true)
+        private set
 
     init {
         activeFixedId = repo.state(KEY_ACTIVE_FIXED)?.toLongOrNull()
@@ -65,6 +67,7 @@ class Store(context: Context) {
         useTrash = repo.state(KEY_USE_TRASH) != "0"
         lastPromptId = repo.state(KEY_LAST_PROMPT)?.toLongOrNull() ?: 0L
         linkImports = repo.state(KEY_LINK_IMPORTS) != "0"
+        pinnedOnly = repo.state(KEY_PINNED_ONLY) != "0"
         reloadProjects()
         reloadMedia()
         reloadTrash()
@@ -254,6 +257,30 @@ class Store(context: Context) {
         repo.setState(KEY_LINK_IMPORTS, if (on) "1" else "0")
     }
 
+    fun updatePinnedOnly(on: Boolean) {
+        pinnedOnly = on
+        repo.setState(KEY_PINNED_ONLY, if (on) "1" else "0")
+    }
+
+    /** よく使う素材として常用パレットに置く。 */
+    fun togglePinned(item: MediaItem) {
+        repo.setPinned(item.id, !item.pinned)
+        reloadMedia()
+    }
+
+    fun setPinnedFor(ids: Set<Long>, pinned: Boolean) {
+        ids.forEach { repo.setPinned(it, pinned) }
+        reloadMedia()
+    }
+
+    /** 選んだ素材をまとめてアーカイブし、一覧から退ける。 */
+    fun archive(ids: Set<Long>) {
+        ids.forEach { repo.setMediaStatus(it, MEDIA_STATUSES[3]) }
+        reloadMedia()
+    }
+
+    fun pinnedCount(): Int = media.count { it.pinned }
+
     fun updateSourcePrompt(mediaId: Long, promptId: Long) {
         repo.setSourcePrompt(mediaId, promptId)
         reloadMedia()
@@ -357,10 +384,11 @@ class Store(context: Context) {
         reloadMedia()
     }
 
-    fun filteredMedia(query: String, status: String?): List<MediaItem> {
+    fun filteredMedia(query: String, status: String?, onlyPinned: Boolean = false): List<MediaItem> {
         val q = query.trim().lowercase()
         return media.filter { m ->
-            (status == null || m.status == status) &&
+            (!onlyPinned || m.pinned) &&
+                (status == null || m.status == status) &&
                 (q.isEmpty() ||
                     m.name.lowercase().contains(q) ||
                     m.tags.any { tag -> tag.name.lowercase().contains(q) } ||

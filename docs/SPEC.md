@@ -1,4 +1,4 @@
-# 整理HQ（SeiriHQApp）統合仕様書 — v1.9
+# 整理HQ（SeiriHQApp）統合仕様書 — v1.10
 
 ## 1. 概要
 
@@ -489,11 +489,51 @@ ZIP作成時に素材が見えるよう、選択中は関係のない操作を�
 
 ボタンは折り返し配置に変更した。横に収まらず潰れていた問題も解消する。
 
+
+---
+
+## 4.19 常用パレット（v1.10）
+
+素材が増えるほど一覧は使いにくくなる。画像は必要になれば生成できるので、
+Inboxの既定表示を「保管庫」から「よく使う数枚のパレット」へ切り替える。
+
+```text
+表示の切り替え
+├─ 常用（既定）  ★を付けた素材だけ
+└─ すべて        全素材。状態での絞り込みもここ
+
+常用への登録
+├─ 素材詳細の [☆ 常用にする]
+└─ 選択モードで複数選んで [★ 常用にする]
+
+常用から外す
+├─ 素材詳細の [★ 常用を解除]
+└─ 選択モードで [常用から外す]
+```
+
+- サムネイル右上の★が常用の印
+- サムネイル右下の「コピー」で、開かずに1タップでクリップボードへ
+- 常用は状態（未整理・整理済みなど）とは独立した印。整理の進み方に左右されない
+
+### 一括アーカイブ
+
+```text
+「すべて」に切り替え
+   ↓
+選択モード → 全選択
+   ↓
+[アーカイブ]
+```
+
+状態をアーカイブに変えるだけで、ファイルは消さない。
+「すべて」でアーカイブを絞り込めばいつでも戻せる。
+まず全部アーカイブして、必要なものだけ常用に上げていく使い方を想定する。
+
 ---
 
 ## 5. データモデル（実装済み）
 
-SQLite（`seirihq.db` / version 5）。両機能で1つのDBを共有する。
+SQLite（`seirihq.db` / version 6）。両機能で1つのDBを共有する。
 
 ```text
 prompt(id, kind['fixed'|'temp'], name, description, body, created_at, updated_at)
@@ -501,10 +541,10 @@ state(key, value)                       -- active_fixed / active_temp / pin_hash
                                         -- biometric_enabled / auth_on_delete
                                         -- trash_tree / retention_days
                                         -- clean_tree / use_trash
-                                        -- last_prompt / link_imports
+                                        -- last_prompt / link_imports / pinned_only
 project(id, name, created_at)
 media(id, uri UNIQUE, kind, name, status, added_at, source, writable,
-      source_prompt_id)
+      source_prompt_id, pinned)
 tag(id, name, kind)                     -- kind: user / ai / system
 media_tag(media_id, tag_id, confirmed)  -- N:M
 media_project(media_id, project_id)     -- N:M

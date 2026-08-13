@@ -12,8 +12,8 @@ android {
         applicationId = "com.appathy.seirihq"
         minSdk = 26
         targetSdk = 34
-        versionCode = 13
-        versionName = "1.9.1"
+        versionCode = 15
+        versionName = "1.10"
     }
 
     signingConfigs {

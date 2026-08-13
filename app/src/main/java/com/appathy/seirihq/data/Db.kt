@@ -34,6 +34,7 @@ const val KEY_TRASH_TREE = "trash_tree"
 const val KEY_CLEAN_TREE = "clean_tree"
 const val KEY_LAST_PROMPT = "last_prompt"
 const val KEY_LINK_IMPORTS = "link_imports"
+const val KEY_PINNED_ONLY = "pinned_only"
 const val KEY_USE_TRASH = "use_trash"
 const val KEY_RETENTION = "retention_days"
 const val DEFAULT_RETENTION_DAYS = 14
@@ -72,7 +73,8 @@ data class MediaItem(
     val projectIds: List<Long>,
     val source: String,
     val writable: Boolean,
-    val sourcePromptId: Long
+    val sourcePromptId: Long,
+    val pinned: Boolean
 )
 
 data class TrashItem(
@@ -85,7 +87,7 @@ data class TrashItem(
     val expireAt: Long
 )
 
-class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seirihq.db", null, 5) {
+class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seirihq.db", null, 6) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -116,7 +118,8 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seiri
                 "added_at INTEGER NOT NULL," +
                 "source TEXT NOT NULL DEFAULT 'saf'," +
                 "writable INTEGER NOT NULL DEFAULT 0," +
-                "source_prompt_id INTEGER NOT NULL DEFAULT 0)"
+                "source_prompt_id INTEGER NOT NULL DEFAULT 0," +
+                "pinned INTEGER NOT NULL DEFAULT 0)"
         )
         db.execSQL(
             "CREATE TABLE trash(" +
@@ -172,6 +175,9 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seiri
         if (oldVersion < 2) {
             db.execSQL("ALTER TABLE media ADD COLUMN source TEXT NOT NULL DEFAULT 'saf'")
             db.execSQL("ALTER TABLE media ADD COLUMN writable INTEGER NOT NULL DEFAULT 0")
+        }
+        if (oldVersion < 6) {
+            db.execSQL("ALTER TABLE media ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
         }
         if (oldVersion < 5) {
             db.execSQL(
@@ -389,7 +395,7 @@ class Repository(context: Context) {
         }
         val out = ArrayList<MediaItem>()
         val c = helper.readableDatabase.rawQuery(
-            "SELECT id,uri,kind,name,status,added_at,source,writable,source_prompt_id " +
+            "SELECT id,uri,kind,name,status,added_at,source,writable,source_prompt_id,pinned " +
                 "FROM media " +
                 "ORDER BY added_at DESC",
             null
@@ -409,7 +415,8 @@ class Repository(context: Context) {
                         projectIds = links[id] ?: emptyList(),
                         source = it.getString(6),
                         writable = it.getInt(7) == 1,
-                        sourcePromptId = it.getLong(8)
+                        sourcePromptId = it.getLong(8),
+                        pinned = it.getInt(9) == 1
                     )
                 )
             }
@@ -420,6 +427,12 @@ class Repository(context: Context) {
     fun setMediaStatus(id: Long, status: String) {
         val v = ContentValues()
         v.put("status", status)
+        helper.writableDatabase.update("media", v, "id=?", arrayOf(id.toString()))
+    }
+
+    fun setPinned(id: Long, pinned: Boolean) {
+        val v = ContentValues()
+        v.put("pinned", if (pinned) 1 else 0)
         helper.writableDatabase.update("media", v, "id=?", arrayOf(id.toString()))
     }
 

@@ -2,7 +2,7 @@
 
 ## 現在地
 
-v1.9.1。プロンプト交通整理と素材交通整理を1アプリに統合した最小構成に、
+v1.10。プロンプト交通整理と素材交通整理を1アプリに統合した最小構成に、
 パスコード＋指紋のロック、ファイル権限による原本削除、ゴミ箱を追加した。
 
 ## 構成
@@ -45,6 +45,8 @@ SeiriHQApp/
 - AIタグは confirmed=0 で入れる想定。Phase 2 で生成処理を足す
 - tag / media_tag は onOpen でも CREATE TABLE IF NOT EXISTS する（更新経路が乱れても壊れないため）
 - Repository.addTag は書き込み後に読み戻して検証し、Result で失敗理由を返す
+- media.pinned が常用フラグ。Inboxの既定は pinned のみ表示（state の pinned_only）
+- 常用は状態と独立。アーカイブは status を変えるだけでファイルは残す
 - クリップボードは他プロバイダのURIをそのまま渡せないため、cacheDir/share へ複製して
   FileProvider のURIを ClipData.newUri で渡す（file_paths.xml に cache-path を追加済み）
 - 横に並べるボタンは FlowRow を使う。Row のままだと画面幅で潰れる
