@@ -26,6 +26,10 @@ const val SOURCE_SAF = "saf"
 const val SOURCE_STORE = "mediastore"
 const val SOURCE_TRASH = "trash"
 
+const val TAG_USER = "user"
+const val TAG_AI = "ai"
+const val TAG_SYSTEM = "system"
+
 const val KEY_TRASH_TREE = "trash_tree"
 const val KEY_CLEAN_TREE = "clean_tree"
 const val KEY_LAST_PROMPT = "last_prompt"
@@ -50,13 +54,20 @@ data class Project(
     val name: String
 )
 
+data class MediaTag(
+    val tagId: Long,
+    val name: String,
+    val kind: String,
+    val confirmed: Boolean
+)
+
 data class MediaItem(
     val id: Long,
     val uri: String,
     val kind: String,
     val name: String,
     val status: String,
-    val tags: String,
+    val tags: List<MediaTag>,
     val addedAt: Long,
     val projectIds: List<Long>,
     val source: String,
@@ -74,7 +85,7 @@ data class TrashItem(
     val expireAt: Long
 )
 
-class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seirihq.db", null, 4) {
+class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seirihq.db", null, 5) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -118,6 +129,20 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seiri
                 "expire_at INTEGER NOT NULL)"
         )
         db.execSQL(
+            "CREATE TABLE tag(" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "name TEXT NOT NULL," +
+                "kind TEXT NOT NULL," +
+                "UNIQUE(name, kind))"
+        )
+        db.execSQL(
+            "CREATE TABLE media_tag(" +
+                "media_id INTEGER NOT NULL," +
+                "tag_id INTEGER NOT NULL," +
+                "confirmed INTEGER NOT NULL DEFAULT 1," +
+                "PRIMARY KEY(media_id, tag_id))"
+        )
+        db.execSQL(
             "CREATE TABLE media_project(" +
                 "media_id INTEGER NOT NULL," +
                 "project_id INTEGER NOT NULL," +
@@ -125,10 +150,45 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seiri
         )
     }
 
+    override fun onOpen(db: SQLiteDatabase) {
+        super.onOpen(db)
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS tag(" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "name TEXT NOT NULL," +
+                "kind TEXT NOT NULL," +
+                "UNIQUE(name, kind))"
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS media_tag(" +
+                "media_id INTEGER NOT NULL," +
+                "tag_id INTEGER NOT NULL," +
+                "confirmed INTEGER NOT NULL DEFAULT 1," +
+                "PRIMARY KEY(media_id, tag_id))"
+        )
+    }
+
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) {
             db.execSQL("ALTER TABLE media ADD COLUMN source TEXT NOT NULL DEFAULT 'saf'")
             db.execSQL("ALTER TABLE media ADD COLUMN writable INTEGER NOT NULL DEFAULT 0")
+        }
+        if (oldVersion < 5) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS tag(" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "name TEXT NOT NULL," +
+                    "kind TEXT NOT NULL," +
+                    "UNIQUE(name, kind))"
+            )
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS media_tag(" +
+                    "media_id INTEGER NOT NULL," +
+                    "tag_id INTEGER NOT NULL," +
+                    "confirmed INTEGER NOT NULL DEFAULT 1," +
+                    "PRIMARY KEY(media_id, tag_id))"
+            )
+            migrateTags(db)
         }
         if (oldVersion < 4) {
             db.execSQL("ALTER TABLE media ADD COLUMN source_prompt_id INTEGER NOT NULL DEFAULT 0")
@@ -144,6 +204,39 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seiri
                     "deleted_at INTEGER NOT NULL," +
                     "expire_at INTEGER NOT NULL)"
             )
+        }
+    }
+}
+
+/** 旧仕様のカンマ区切りタグを、正規化したテーブルへ移す。 */
+private fun migrateTags(db: SQLiteDatabase) {
+    val pairs = ArrayList<Pair<Long, String>>()
+    val c = db.rawQuery("SELECT id, tags FROM media", null)
+    c.use {
+        while (it.moveToNext()) {
+            val raw = it.getString(1) ?: ""
+            if (raw.isNotBlank()) pairs.add(it.getLong(0) to raw)
+        }
+    }
+    pairs.forEach { (mediaId, raw) ->
+        raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.forEach { name ->
+            val tag = ContentValues()
+            tag.put("name", name)
+            tag.put("kind", TAG_USER)
+            db.insertWithOnConflict("tag", null, tag, SQLiteDatabase.CONFLICT_IGNORE)
+            val idCursor = db.rawQuery(
+                "SELECT id FROM tag WHERE name=? AND kind=?",
+                arrayOf(name, TAG_USER)
+            )
+            var tagId = -1L
+            idCursor.use { if (it.moveToFirst()) tagId = it.getLong(0) }
+            if (tagId > 0) {
+                val link = ContentValues()
+                link.put("media_id", mediaId)
+                link.put("tag_id", tagId)
+                link.put("confirmed", 1)
+                db.insertWithOnConflict("media_tag", null, link, SQLiteDatabase.CONFLICT_IGNORE)
+            }
         }
     }
 }
@@ -275,9 +368,28 @@ class Repository(context: Context) {
                 links.getOrPut(m) { ArrayList() }.add(it.getLong(1))
             }
         }
+        val tagMap = HashMap<Long, MutableList<MediaTag>>()
+        val tc = helper.readableDatabase.rawQuery(
+            "SELECT mt.media_id, t.id, t.name, t.kind, mt.confirmed " +
+                "FROM media_tag mt JOIN tag t ON t.id = mt.tag_id",
+            null
+        )
+        tc.use {
+            while (it.moveToNext()) {
+                val mediaId = it.getLong(0)
+                tagMap.getOrPut(mediaId) { ArrayList() }.add(
+                    MediaTag(
+                        tagId = it.getLong(1),
+                        name = it.getString(2),
+                        kind = it.getString(3),
+                        confirmed = it.getInt(4) == 1
+                    )
+                )
+            }
+        }
         val out = ArrayList<MediaItem>()
         val c = helper.readableDatabase.rawQuery(
-            "SELECT id,uri,kind,name,status,tags,added_at,source,writable,source_prompt_id " +
+            "SELECT id,uri,kind,name,status,added_at,source,writable,source_prompt_id " +
                 "FROM media " +
                 "ORDER BY added_at DESC",
             null
@@ -292,12 +404,12 @@ class Repository(context: Context) {
                         kind = it.getString(2),
                         name = it.getString(3),
                         status = it.getString(4),
-                        tags = it.getString(5),
-                        addedAt = it.getLong(6),
+                        tags = tagMap[id] ?: emptyList(),
+                        addedAt = it.getLong(5),
                         projectIds = links[id] ?: emptyList(),
-                        source = it.getString(7),
-                        writable = it.getInt(8) == 1,
-                        sourcePromptId = it.getLong(9)
+                        source = it.getString(6),
+                        writable = it.getInt(7) == 1,
+                        sourcePromptId = it.getLong(8)
                     )
                 )
             }
@@ -317,10 +429,62 @@ class Repository(context: Context) {
         helper.writableDatabase.update("media", v, "id=?", arrayOf(id.toString()))
     }
 
-    fun setMediaTags(id: Long, tags: String) {
+    fun ensureTag(name: String, kind: String): Long {
+        val db = helper.writableDatabase
         val v = ContentValues()
-        v.put("tags", tags)
-        helper.writableDatabase.update("media", v, "id=?", arrayOf(id.toString()))
+        v.put("name", name)
+        v.put("kind", kind)
+        db.insertWithOnConflict("tag", null, v, SQLiteDatabase.CONFLICT_IGNORE)
+        val c = db.rawQuery("SELECT id FROM tag WHERE name=? AND kind=?", arrayOf(name, kind))
+        c.use { return if (it.moveToFirst()) it.getLong(0) else -1L }
+    }
+
+    fun addTag(mediaId: Long, name: String, kind: String, confirmed: Boolean): Result<Unit> =
+        runCatching {
+            val tagId = ensureTag(name, kind)
+            if (tagId <= 0) error("タグを作成できませんでした")
+            val v = ContentValues()
+            v.put("media_id", mediaId)
+            v.put("tag_id", tagId)
+            v.put("confirmed", if (confirmed) 1 else 0)
+            helper.writableDatabase.insertWithOnConflict(
+                "media_tag", null, v, SQLiteDatabase.CONFLICT_REPLACE
+            )
+            val check = helper.readableDatabase.rawQuery(
+                "SELECT COUNT(*) FROM media_tag WHERE media_id=? AND tag_id=?",
+                arrayOf(mediaId.toString(), tagId.toString())
+            )
+            val saved = check.use { if (it.moveToFirst()) it.getInt(0) else 0 }
+            if (saved == 0) error("保存を確認できませんでした")
+        }
+
+    fun removeTag(mediaId: Long, tagId: Long) {
+        helper.writableDatabase.delete(
+            "media_tag",
+            "media_id=? AND tag_id=?",
+            arrayOf(mediaId.toString(), tagId.toString())
+        )
+    }
+
+    fun confirmTag(mediaId: Long, tagId: Long) {
+        val v = ContentValues()
+        v.put("confirmed", 1)
+        helper.writableDatabase.update(
+            "media_tag",
+            v,
+            "media_id=? AND tag_id=?",
+            arrayOf(mediaId.toString(), tagId.toString())
+        )
+    }
+
+    fun tagNames(kind: String): List<String> {
+        val out = ArrayList<String>()
+        val c = helper.readableDatabase.rawQuery(
+            "SELECT name FROM tag WHERE kind=? ORDER BY name ASC",
+            arrayOf(kind)
+        )
+        c.use { while (it.moveToNext()) out.add(it.getString(0)) }
+        return out
     }
 
     fun linkProject(mediaId: Long, projectId: Long) {
@@ -345,7 +509,7 @@ class Repository(context: Context) {
         v.put("name", item.name)
         v.put("kind", item.kind)
         v.put("uri", uri)
-        v.put("tags", item.tags)
+        v.put("tags", item.tags.joinToString(",") { tag -> tag.name })
         v.put("deleted_at", System.currentTimeMillis())
         v.put("expire_at", expireAt)
         return helper.writableDatabase.insert("trash", null, v)
@@ -382,6 +546,7 @@ class Repository(context: Context) {
     fun deleteMedia(id: Long) {
         val db = helper.writableDatabase
         db.delete("media_project", "media_id=?", arrayOf(id.toString()))
+        db.delete("media_tag", "media_id=?", arrayOf(id.toString()))
         db.delete("media", "id=?", arrayOf(id.toString()))
     }
 }

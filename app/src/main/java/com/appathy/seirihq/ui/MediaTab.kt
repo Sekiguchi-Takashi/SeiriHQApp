@@ -1,4 +1,7 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+    androidx.compose.foundation.layout.ExperimentalLayoutApi::class
+)
 
 package com.appathy.seirihq.ui
 
@@ -18,6 +21,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -31,6 +35,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -66,6 +71,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -79,9 +85,12 @@ import com.appathy.seirihq.data.MEDIA_VIDEO
 import com.appathy.seirihq.data.MediaFiles
 import com.appathy.seirihq.data.MediaItem
 import com.appathy.seirihq.data.SOURCE_SAF
+import com.appathy.seirihq.data.TAG_AI
+import com.appathy.seirihq.data.TAG_SYSTEM
 import com.appathy.seirihq.data.SOURCE_STORE
 import com.appathy.seirihq.data.Store
 import com.appathy.seirihq.data.FolderCleaner
+import com.appathy.seirihq.data.ImageClip
 import com.appathy.seirihq.data.TrashFiles
 import com.appathy.seirihq.data.TrashItem
 import com.appathy.seirihq.data.ZipMaker
@@ -353,6 +362,7 @@ private fun InboxScreen(
     var selectMode by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var workBusy by remember { mutableStateOf(false) }
+    var zipProgress by remember { mutableStateOf("") }
 
     val folderImport = rememberLauncherForActivityResult(OpenDocumentTree()) { treeUri: Uri? ->
         if (treeUri != null) {
@@ -392,11 +402,15 @@ private fun InboxScreen(
         if (destination != null) {
             val targets = store.media.filter { selectedIds.contains(it.id) }
             workBusy = true
+            zipProgress = "0 / ${targets.size}"
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
-                    ZipMaker.zip(context, targets, destination)
+                    ZipMaker.zip(context, targets, destination) { done ->
+                        zipProgress = "$done / ${targets.size}"
+                    }
                 }
                 workBusy = false
+                zipProgress = ""
                 val message = result.getOrNull()?.let { "${it}件をZIPにしました" }
                     ?: (result.exceptionOrNull()?.message ?: "ZIPを作成できませんでした")
                 Toast.makeText(context, message, Toast.LENGTH_LONG).show()
@@ -441,27 +455,9 @@ private fun InboxScreen(
             }
         )
 
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Button(onClick = onOpenSort) { Text("交通整理 ${store.sortQueue().size}") }
-            OutlinedButton(onClick = onOpenProjects) { Text("プロジェクト") }
-            OutlinedButton(onClick = onOpenCleanup) { Text("ダウンロード整理") }
-        }
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedButton(
-                enabled = !workBusy,
-                onClick = { folderImport.launch(null) }
-            ) { Text(if (workBusy) "処理中…" else "フォルダから取り込み") }
-        }
-
         if (selectMode) {
-            Row(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            FlowRow(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(
@@ -470,15 +466,37 @@ private fun InboxScreen(
                         val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())
                         zipCreator.launch("seirihq_$stamp.zip")
                     }
-                ) { Text("ZIPにする ${selectedIds.size}") }
+                ) {
+                    Text(
+                        if (zipProgress.isNotEmpty()) "ZIP作成中 $zipProgress"
+                        else "ZIPにする ${selectedIds.size}"
+                    )
+                }
                 OutlinedButton(onClick = { selectedIds = items.map { it.id }.toSet() }) {
-                    Text("表示中を全選択")
+                    Text("全選択")
                 }
                 TextButton(onClick = { selectedIds = emptySet() }) { Text("解除") }
+                TextButton(onClick = {
+                    selectMode = false
+                    selectedIds = emptySet()
+                }) { Text("選択終了") }
+            }
+        } else {
+            FlowRow(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(onClick = onOpenSort) { Text("交通整理 ${store.sortQueue().size}") }
+                OutlinedButton(onClick = onOpenProjects) { Text("プロジェクト") }
+                OutlinedButton(onClick = onOpenCleanup) { Text("ダウンロード整理") }
+                OutlinedButton(
+                    enabled = !workBusy,
+                    onClick = { folderImport.launch(null) }
+                ) { Text(if (workBusy) "処理中…" else "フォルダから取り込み") }
             }
         }
 
-        if (!granted) {
+        if (!granted && !selectMode) {
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -496,7 +514,7 @@ private fun InboxScreen(
                     }) { Text("ファイル権限を付与") }
                 }
             }
-        } else {
+        } else if (!selectMode) {
             Row(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -512,36 +530,38 @@ private fun InboxScreen(
             }
         }
 
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            label = { Text("検索（名前・タグ・プロジェクト）") },
-            singleLine = true
-        )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            FilterChip(
-                selected = status == null,
-                onClick = { status = null },
-                label = { Text("すべて") }
+        if (!selectMode) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                label = { Text("検索（名前・タグ・プロジェクト）") },
+                singleLine = true
             )
-            listOf(MEDIA_STATUSES[0], MEDIA_STATUSES[4]).forEach { s ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 FilterChip(
-                    selected = status == s,
-                    onClick = { status = if (status == s) null else s },
-                    label = { Text(s) }
+                    selected = status == null,
+                    onClick = { status = null },
+                    label = { Text("すべて") }
                 )
+                listOf(MEDIA_STATUSES[0], MEDIA_STATUSES[4]).forEach { s ->
+                    FilterChip(
+                        selected = status == s,
+                        onClick = { status = if (status == s) null else s },
+                        label = { Text(s) }
+                    )
+                }
             }
         }
         Text(
-            "${items.size} 件",
+            if (selectMode) "${items.size} 件 / 選択 ${selectedIds.size}" else "${items.size} 件",
             modifier = Modifier.padding(horizontal = 16.dp),
             style = MaterialTheme.typography.bodySmall
         )
@@ -677,7 +697,7 @@ private fun MediaDetailScreen(store: Store, id: Long, modifier: Modifier, onBack
         return
     }
     val scope = rememberCoroutineScope()
-    var tags by remember(item.id) { mutableStateOf(item.tags) }
+    var newTag by remember(item.id) { mutableStateOf("") }
     var confirmRemove by remember { mutableStateOf(false) }
     var confirmOriginal by remember { mutableStateOf(false) }
     var askPin by remember { mutableStateOf(false) }
@@ -819,6 +839,25 @@ private fun MediaDetailScreen(store: Store, id: Long, modifier: Modifier, onBack
             }
             Text(item.name, style = MaterialTheme.typography.titleMedium)
 
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = {
+                    val result = ImageClip.copy(context, item)
+                    val message = if (result.isSuccess) {
+                        "コピーしました。プロンプト入力欄に貼り付けられます"
+                    } else {
+                        result.exceptionOrNull()?.message ?: "コピーできませんでした"
+                    }
+                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                }) { Text("画像をコピー") }
+                OutlinedButton(onClick = { shareUri(context, item.uri, item.kind) }) {
+                    Text("送る")
+                }
+            }
+            Text(
+                "コピーしたあと、生成AIアプリの入力欄で長押しして貼り付けてください。貼り付けに対応していないアプリでは「送る」を使ってください。",
+                style = MaterialTheme.typography.bodySmall
+            )
+
             Text("状態", style = MaterialTheme.typography.labelLarge)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 MEDIA_STATUSES.take(3).forEach { s ->
@@ -856,14 +895,83 @@ private fun MediaDetailScreen(store: Store, id: Long, modifier: Modifier, onBack
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text("タグ", style = MaterialTheme.typography.labelLarge)
+                    if (item.tags.isEmpty()) {
+                        Text("タグはまだありません。", style = MaterialTheme.typography.bodySmall)
+                    }
+                    item.tags.forEach { tag ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                when (tag.kind) {
+                                    TAG_AI -> if (tag.confirmed) "AI ${tag.name}" else "AI? ${tag.name}"
+                                    TAG_SYSTEM -> "自動 ${tag.name}"
+                                    else -> tag.name
+                                },
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            if (tag.kind == TAG_AI && !tag.confirmed) {
+                                TextButton(onClick = { store.confirmTag(item.id, tag.tagId) }) {
+                                    Text("確定")
+                                }
+                            }
+                            TextButton(onClick = { store.removeTag(item.id, tag.tagId) }) {
+                                Text("削除")
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    fun submitTag() {
+                        val name = newTag.trim()
+                        if (name.isEmpty()) {
+                            Toast.makeText(context, "タグ名を入力してください", Toast.LENGTH_SHORT).show()
+                            return
+                        }
+                        if (item.tags.any { it.name == name }) {
+                            Toast.makeText(context, "すでに付いています", Toast.LENGTH_SHORT).show()
+                            newTag = ""
+                            return
+                        }
+                        val result = store.addTag(item.id, name)
+                        if (result.isSuccess) {
+                            newTag = ""
+                            Toast.makeText(context, "「$name」を追加しました", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val reason = result.exceptionOrNull()?.message ?: "不明なエラー"
+                            Toast.makeText(context, "追加できません: $reason", Toast.LENGTH_LONG).show()
+                        }
+                    }
                     OutlinedTextField(
-                        value = tags,
-                        onValueChange = { tags = it },
+                        value = newTag,
+                        onValueChange = { newTag = it },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("カンマ区切り 例: 京都,犬,旅行") }
+                        label = { Text("タグ名") },
+                        placeholder = { Text("例: 京都") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { submitTag() })
                     )
                     Spacer(Modifier.height(8.dp))
-                    Button(onClick = { store.setTags(item.id, tags.trim()) }) { Text("タグを保存") }
+                    Button(onClick = { submitTag() }) { Text("＋ タグを追加") }
+                    val suggestions = store.userTagNames()
+                        .filter { name -> item.tags.none { it.name == name } }
+                        .take(8)
+                    if (suggestions.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("よく使うタグ", style = MaterialTheme.typography.bodySmall)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            suggestions.take(3).forEach { name ->
+                                TextButton(onClick = {
+                                    val result = store.addTag(item.id, name)
+                                    val message = if (result.isSuccess) "「$name」を追加しました"
+                                    else "追加できません: ${result.exceptionOrNull()?.message}"
+                                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                }) { Text(name) }
+                            }
+                        }
+                    }
                 }
             }
 

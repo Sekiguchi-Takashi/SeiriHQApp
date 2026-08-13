@@ -25,7 +25,12 @@ object ZipMaker {
      * 選んだ素材を1つのZIPにまとめて、指定された出力先へ書き出す。
      * 出力先はSAFで選ぶため、クラウドのフォルダも指定できる。
      */
-    fun zip(context: Context, items: List<MediaItem>, destination: Uri): Result<Int> {
+    fun zip(
+        context: Context,
+        items: List<MediaItem>,
+        destination: Uri,
+        onProgress: (Int) -> Unit = {}
+    ): Result<Int> {
         val resolver = context.contentResolver
         return runCatching {
             var count = 0
@@ -44,6 +49,7 @@ object ZipMaker {
                                 zip.closeEntry()
                             }
                             count++
+                            onProgress(count)
                         }
                     }
                 }

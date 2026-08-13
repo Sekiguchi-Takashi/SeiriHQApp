@@ -1,4 +1,4 @@
-# 整理HQ（SeiriHQApp）統合仕様書 — v1.6
+# 整理HQ（SeiriHQApp）統合仕様書 — v1.9
 
 ## 1. 概要
 
@@ -427,11 +427,73 @@ ZIPを書き出す
 - 読み込めなかった素材は飛ばし、書き出せた件数を通知する
 - 素材そのものは移動・削除しない
 
+
+---
+
+## 4.16 タグの正規化（v1.7）
+
+タグを文字列から独立したテーブルへ移した。Phase 2（AI分類）の土台になる。
+
+```text
+tag(id, name, kind)          kind = user / ai / system
+media_tag(media_id, tag_id, confirmed)
+```
+
+```text
+ユーザータグ  自分で付けたタグ。確定済みとして扱う
+AIタグ        AIが提案したタグ。confirmed=0 で「AI?」と表示し、確定か削除を選ぶ
+システムタグ  取り込み経路など、アプリが自動で付けるタグ
+```
+
+- 素材詳細でタグの追加・削除、AIタグの確定ができる
+- 「よく使うタグ」から1タップで追加できる
+- 検索はタグ名にも一致する
+- 旧仕様のカンマ区切りタグは、更新時にユーザータグとして自動で移行する
+
+現時点でAIタグを作る処理はない。器だけを先に用意し、Phase 2で埋める。
+
+
+---
+
+## 4.17 素材をプロンプトに貼る（v1.8）
+
+```text
+素材詳細
+   ↓
+[画像をコピー]
+   ↓
+キャッシュへ複製し、FileProvider のURIとしてクリップボードへ
+   ↓
+生成AIアプリの入力欄で長押し→貼り付け
+```
+
+- 貼り付けに対応しないアプリ向けに「送る」（共有）も同じ場所に置く
+- キャッシュの複製は次のコピー時に消える
+- 原本は変更しない
+
+## 4.18 選択モードの表示（v1.8）
+
+ZIP作成時に素材が見えるよう、選択中は関係のない操作を隠す。
+
+```text
+選択モード中に表示するもの
+├─ ZIPにする / 全選択 / 解除 / 選択終了
+├─ 件数と選択件数
+└─ サムネイル
+
+隠すもの
+├─ 交通整理・プロジェクト・ダウンロード整理・フォルダから取り込み
+├─ 端末から一括取り込み、権限の案内
+└─ 検索欄と状態の絞り込み
+```
+
+ボタンは折り返し配置に変更した。横に収まらず潰れていた問題も解消する。
+
 ---
 
 ## 5. データモデル（実装済み）
 
-SQLite（`seirihq.db` / version 4）。両機能で1つのDBを共有する。
+SQLite（`seirihq.db` / version 5）。両機能で1つのDBを共有する。
 
 ```text
 prompt(id, kind['fixed'|'temp'], name, description, body, created_at, updated_at)
@@ -441,14 +503,15 @@ state(key, value)                       -- active_fixed / active_temp / pin_hash
                                         -- clean_tree / use_trash
                                         -- last_prompt / link_imports
 project(id, name, created_at)
-media(id, uri UNIQUE, kind, name, status, tags, added_at, source, writable,
+media(id, uri UNIQUE, kind, name, status, added_at, source, writable,
       source_prompt_id)
+tag(id, name, kind)                     -- kind: user / ai / system
+media_tag(media_id, tag_id, confirmed)  -- N:M
 media_project(media_id, project_id)     -- N:M
 trash(id, name, kind, uri, tags, deleted_at, expire_at)
 ```
 
 - ③任意入力は永続保存しない（メモリ上のみ）
-- タグは現状カンマ区切りのTEXT。Phase 1で `tag` / `media_tag` へ正規化する
 - メディアは参照（URI）で保持し、物理コピーを作らない
 - `source` は取り込み元（`saf` / `mediastore`）、`writable` は原本を削除できるかの判定に使う
 

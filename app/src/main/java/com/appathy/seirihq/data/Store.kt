@@ -312,10 +312,25 @@ class Store(context: Context) {
         reloadMedia()
     }
 
-    fun setTags(id: Long, tags: String) {
-        repo.setMediaTags(id, tags)
+    fun addTag(mediaId: Long, name: String, kind: String = TAG_USER): Result<Unit> {
+        val cleaned = name.trim()
+        if (cleaned.isEmpty()) return Result.failure(IllegalArgumentException("タグ名が空です"))
+        val result = repo.addTag(mediaId, cleaned, kind, kind != TAG_AI)
+        reloadMedia()
+        return result
+    }
+
+    fun removeTag(mediaId: Long, tagId: Long) {
+        repo.removeTag(mediaId, tagId)
         reloadMedia()
     }
+
+    fun confirmTag(mediaId: Long, tagId: Long) {
+        repo.confirmTag(mediaId, tagId)
+        reloadMedia()
+    }
+
+    fun userTagNames(): List<String> = repo.tagNames(TAG_USER)
 
     fun toggleProject(mediaId: Long, projectId: Long, on: Boolean) {
         if (on) repo.linkProject(mediaId, projectId) else repo.unlinkProject(mediaId, projectId)
@@ -348,7 +363,7 @@ class Store(context: Context) {
             (status == null || m.status == status) &&
                 (q.isEmpty() ||
                     m.name.lowercase().contains(q) ||
-                    m.tags.lowercase().contains(q) ||
+                    m.tags.any { tag -> tag.name.lowercase().contains(q) } ||
                     m.projectIds.any { projectName(it).lowercase().contains(q) })
         }
     }

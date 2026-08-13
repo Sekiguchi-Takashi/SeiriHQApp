@@ -3,4 +3,7 @@
     <files-path
         name="trash"
         path="trash/" />
+    <cache-path
+        name="share"
+        path="share/" />
 </paths>

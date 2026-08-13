@@ -2,7 +2,7 @@
 
 ## 現在地
 
-v1.6。プロンプト交通整理と素材交通整理を1アプリに統合した最小構成に、
+v1.9.1。プロンプト交通整理と素材交通整理を1アプリに統合した最小構成に、
 パスコード＋指紋のロック、ファイル権限による原本削除、ゴミ箱を追加した。
 
 ## 構成
@@ -40,6 +40,17 @@ SeiriHQApp/
 - 生成元プロンプトは media.source_prompt_id（0は未設定）。コピー時の①②を state に記録している
 - フォルダ取り込みは FolderCleaner.list を再利用し、画像・動画だけを登録する（直下のみ）
 - ZIP出力は CreateDocument("application/zip") で出力先を選ばせ、ZipOutputStream へ直接流す
+- タグは tag / media_tag に正規化済み。media.tags 列は残っているが読み書きしない
+- DB v5 の onUpgrade で旧カンマ区切りタグをユーザータグへ移行する（migrateTags）
+- AIタグは confirmed=0 で入れる想定。Phase 2 で生成処理を足す
+- tag / media_tag は onOpen でも CREATE TABLE IF NOT EXISTS する（更新経路が乱れても壊れないため）
+- Repository.addTag は書き込み後に読み戻して検証し、Result で失敗理由を返す
+- クリップボードは他プロバイダのURIをそのまま渡せないため、cacheDir/share へ複製して
+  FileProvider のURIを ClipData.newUri で渡す（file_paths.xml に cache-path を追加済み）
+- 横に並べるボタンは FlowRow を使う。Row のままだと画面幅で潰れる
+- アイコンは res/mipmap-xxxhdpi/ic_launcher_source.png を差し替えるだけで変わる。
+  adaptive-icon の前景は drawable/ic_launcher_foreground.xml が18dpの余白を付けて表示する
+  （minSdk 26 なので mipmap-anydpi-v26 のみで足りる）
 - ナビゲーションライブラリは使わず、タブ内の `sealed class` ルート + `BackHandler`
 - 指紋認証に androidx.biometric を使うため、MainActivity は `FragmentActivity`
 - パスコードは PBKDF2（20000回・ソルト付き）でハッシュ化し state テーブルへ保存
@@ -54,7 +65,6 @@ SeiriHQApp/
 
 ## 次にやること（優先順）
 
-1. タグの正規化（tag / media_tag テーブル）と3種別タグ
-2. プロジェクト単位でプロンプトを絞り込む（プロンプトセットの前段）
-3. スワイプ方向を設定で変更できるようにする
-4. AI（Phase 2）は接続方式を決めてから着手
+1. プロジェクト単位でプロンプトを絞り込む（プロンプトセットの前段）
+2. スワイプ方向を設定で変更できるようにする
+3. AI（Phase 2）は接続方式を決めてから着手。タグの器は用意済み
