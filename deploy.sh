@@ -31,4 +31,5 @@ git remote add origin "https://$TOKEN@github.com/$OWNER/$REPO.git"
 git add -A
 git commit -m "$MSG" || true
 git branch -M main
+git pull --rebase origin main || true
 git push -u origin main

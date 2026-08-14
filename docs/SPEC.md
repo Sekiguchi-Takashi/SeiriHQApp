@@ -1,4 +1,4 @@
-# 整理HQ（SeiriHQApp）統合仕様書 — v1.10
+# 整理HQ（SeiriHQApp）統合仕様書 — v1.11
 
 ## 1. 概要
 
@@ -529,11 +529,43 @@ Inboxの既定表示を「保管庫」から「よく使う数枚のパレット
 「すべて」でアーカイブを絞り込めばいつでも戻せる。
 まず全部アーカイブして、必要なものだけ常用に上げていく使い方を想定する。
 
+
+---
+
+## 4.20 プロンプトセットと作業中プロジェクト（v1.11）
+
+用途ごとに①②とプロジェクトの組み合わせを残し、一度に呼び出せるようにする。
+
+```text
+プロンプトタブ
+├─ [いまの状態を保存]  ①②＋プロジェクトに名前を付けて保存
+└─ [セットを呼び出す]  選ぶと①②とプロジェクトが同時に切り替わる
+```
+
+```text
+作業中プロジェクトが設定されているとき
+
+プロンプトをコピー
+   ↓
+生成
+   ↓
+取り込み
+   ↓
+├─ 生成元プロンプトを記録（v1.5）
+└─ 作業中プロジェクトへ自動で紐づけ（v1.11）
+```
+
+- 素材タブにも「取り込み先：〇〇」と表示する
+- プロジェクトなしでも保存でき、その場合は自動紐づけをしない
+- 「プロジェクト解除」でいつでも外せる
+
+これで、プロンプト側と素材側が同じプロジェクトで一本につながる。
+
 ---
 
 ## 5. データモデル（実装済み）
 
-SQLite（`seirihq.db` / version 6）。両機能で1つのDBを共有する。
+SQLite（`seirihq.db` / version 7）。両機能で1つのDBを共有する。
 
 ```text
 prompt(id, kind['fixed'|'temp'], name, description, body, created_at, updated_at)
@@ -542,9 +574,11 @@ state(key, value)                       -- active_fixed / active_temp / pin_hash
                                         -- trash_tree / retention_days
                                         -- clean_tree / use_trash
                                         -- last_prompt / link_imports / pinned_only
+                                        -- active_project
 project(id, name, created_at)
 media(id, uri UNIQUE, kind, name, status, added_at, source, writable,
       source_prompt_id, pinned)
+prompt_set(id, name, fixed_id, temp_id, project_id, created_at)
 tag(id, name, kind)                     -- kind: user / ai / system
 media_tag(media_id, tag_id, confirmed)  -- N:M
 media_project(media_id, project_id)     -- N:M

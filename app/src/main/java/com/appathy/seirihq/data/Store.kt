@@ -53,6 +53,10 @@ class Store(context: Context) {
         private set
     var pinnedOnly by mutableStateOf(true)
         private set
+    var promptSets by mutableStateOf<List<PromptSet>>(emptyList())
+        private set
+    var activeProjectId by mutableStateOf(0L)
+        private set
 
     init {
         activeFixedId = repo.state(KEY_ACTIVE_FIXED)?.toLongOrNull()
@@ -68,6 +72,8 @@ class Store(context: Context) {
         lastPromptId = repo.state(KEY_LAST_PROMPT)?.toLongOrNull() ?: 0L
         linkImports = repo.state(KEY_LINK_IMPORTS) != "0"
         pinnedOnly = repo.state(KEY_PINNED_ONLY) != "0"
+        activeProjectId = repo.state(KEY_ACTIVE_PROJECT)?.toLongOrNull() ?: 0L
+        reloadPromptSets()
         reloadProjects()
         reloadMedia()
         reloadTrash()
@@ -242,7 +248,44 @@ class Store(context: Context) {
 
     fun addMedia(uri: String, kind: String, name: String, source: String, writable: Boolean) {
         val promptId = if (linkImports) lastPromptId else 0L
-        repo.insertMedia(uri, kind, name, source, writable, promptId)
+        val id = repo.insertMedia(uri, kind, name, source, writable, promptId)
+        val project = activeProjectId
+        if (id > 0 && project > 0) repo.linkProject(id, project)
+    }
+
+    fun reloadPromptSets() {
+        promptSets = repo.promptSets()
+    }
+
+    /** いまの①②とプロジェクトの組み合わせを、用途別のセットとして残す。 */
+    fun savePromptSet(name: String, projectId: Long) {
+        val cleaned = name.trim()
+        if (cleaned.isEmpty()) return
+        repo.insertPromptSet(
+            cleaned,
+            activeFixedId ?: 0L,
+            activeTempId ?: 0L,
+            projectId
+        )
+        reloadPromptSets()
+    }
+
+    /** セットを呼び出して①②と作業中プロジェクトを一度に切り替える。 */
+    fun applyPromptSet(set: PromptSet) {
+        setActiveFixed(set.fixedId.takeIf { it > 0L })
+        setActiveTemp(set.tempId.takeIf { it > 0L })
+        updateActiveProject(set.projectId)
+    }
+
+    fun deletePromptSet(id: Long) {
+        repo.deletePromptSet(id)
+        reloadPromptSets()
+    }
+
+    /** 作業中のプロジェクト。取り込んだ素材はここへ自動で紐づく。 */
+    fun updateActiveProject(projectId: Long) {
+        activeProjectId = projectId
+        repo.setState(KEY_ACTIVE_PROJECT, projectId.toString())
     }
 
     /** コピーした時点のプロンプトを覚えておき、取り込んだ素材の生成元にする。 */

@@ -1,4 +1,7 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+    androidx.compose.foundation.layout.ExperimentalLayoutApi::class
+)
 
 package com.appathy.seirihq.ui
 
@@ -23,6 +26,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -51,6 +55,7 @@ import com.appathy.seirihq.data.KIND_TEMP
 import com.appathy.seirihq.data.MAX_FIXED
 import com.appathy.seirihq.data.MAX_TEMP
 import com.appathy.seirihq.data.PromptItem
+import com.appathy.seirihq.data.PromptSet
 import com.appathy.seirihq.data.Store
 
 private sealed class PromptRoute {
@@ -105,6 +110,8 @@ private fun PromptTopScreen(
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    var showSets by remember { mutableStateOf(false) }
+    var saveSet by remember { mutableStateOf(false) }
     val fixed = store.activeFixed()
     val temp = store.activeTemp()
     val composed = store.composed()
@@ -200,6 +207,42 @@ private fun PromptTopScreen(
 
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(12.dp)) {
+                    Text("セット", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        "①②とプロジェクトの組み合わせを用途別に残せます。",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        "作業中のプロジェクト：" + (
+                            if (store.activeProjectId > 0L) store.projectName(store.activeProjectId)
+                            else "なし"
+                            ),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    if (store.activeProjectId > 0L) {
+                        Text(
+                            "取り込んだ素材はこのプロジェクトへ自動で入ります。",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            enabled = store.promptSets.isNotEmpty(),
+                            onClick = { showSets = true }
+                        ) { Text("セットを呼び出す ${store.promptSets.size}") }
+                        OutlinedButton(onClick = { saveSet = true }) { Text("いまの状態を保存") }
+                        if (store.activeProjectId > 0L) {
+                            TextButton(onClick = { store.updateActiveProject(0L) }) {
+                                Text("プロジェクト解除")
+                            }
+                        }
+                    }
+                }
+            }
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp)) {
                     Text("完成プロンプト", style = MaterialTheme.typography.labelLarge)
                     Spacer(Modifier.height(4.dp))
                     Text(
@@ -221,6 +264,106 @@ private fun PromptTopScreen(
             Spacer(Modifier.height(24.dp))
         }
     }
+
+    if (showSets) {
+        AlertDialog(
+            onDismissRequest = { showSets = false },
+            title = { Text("セットを呼び出す") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    store.promptSets.forEach { set ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(set.name, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    describeSet(store, set),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                            TextButton(onClick = {
+                                store.applyPromptSet(set)
+                                showSets = false
+                                Toast.makeText(context, "「${set.name}」を適用しました", Toast.LENGTH_SHORT)
+                                    .show()
+                            }) { Text("適用") }
+                            TextButton(onClick = { store.deletePromptSet(set.id) }) { Text("削除") }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSets = false }) { Text("閉じる") }
+            }
+        )
+    }
+
+    if (saveSet) {
+        SaveSetDialog(
+            store = store,
+            onDismiss = { saveSet = false },
+            onSave = { name, projectId ->
+                store.savePromptSet(name, projectId)
+                store.updateActiveProject(projectId)
+                saveSet = false
+                Toast.makeText(context, "「$name」を保存しました", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+}
+
+private fun describeSet(store: Store, set: PromptSet): String {
+    val fixed = store.prompt(set.fixedId.takeIf { it > 0L })?.name ?: "①なし"
+    val temp = store.prompt(set.tempId.takeIf { it > 0L })?.name ?: "②なし"
+    val project = if (set.projectId > 0L) store.projectName(set.projectId) else "プロジェクトなし"
+    return "$fixed / $temp / $project"
+}
+
+@Composable
+private fun SaveSetDialog(
+    store: Store,
+    onDismiss: () -> Unit,
+    onSave: (String, Long) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var projectId by remember { mutableStateOf(store.activeProjectId) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("セットとして保存") },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("セット名") },
+                    placeholder = { Text("例: 商品写真の生成") },
+                    singleLine = true
+                )
+                Spacer(Modifier.height(8.dp))
+                Text("プロジェクト（任意）", style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { projectId = 0L }) {
+                    Text(if (projectId == 0L) "・なし" else "なし")
+                }
+                store.projects.forEach { project ->
+                    TextButton(onClick = { projectId = project.id }) {
+                        Text(if (projectId == project.id) "・${project.name}" else project.name)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = name.isNotBlank(),
+                onClick = { onSave(name.trim(), projectId) }
+            ) { Text("保存") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("キャンセル") }
+        }
+    )
 }
 
 @Composable

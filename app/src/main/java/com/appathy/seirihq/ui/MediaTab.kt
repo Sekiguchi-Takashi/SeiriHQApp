@@ -517,6 +517,14 @@ private fun InboxScreen(
             }
         }
 
+        if (store.activeProjectId > 0L && !selectMode) {
+            Text(
+                "取り込み先：${store.projectName(store.activeProjectId)}",
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+
         if (!granted && !selectMode) {
             Card(
                 modifier = Modifier

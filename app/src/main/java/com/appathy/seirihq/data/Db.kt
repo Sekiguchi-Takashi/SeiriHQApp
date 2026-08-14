@@ -35,6 +35,7 @@ const val KEY_CLEAN_TREE = "clean_tree"
 const val KEY_LAST_PROMPT = "last_prompt"
 const val KEY_LINK_IMPORTS = "link_imports"
 const val KEY_PINNED_ONLY = "pinned_only"
+const val KEY_ACTIVE_PROJECT = "active_project"
 const val KEY_USE_TRASH = "use_trash"
 const val KEY_RETENTION = "retention_days"
 const val DEFAULT_RETENTION_DAYS = 14
@@ -48,6 +49,14 @@ data class PromptItem(
     val description: String,
     val body: String,
     val updatedAt: Long
+)
+
+data class PromptSet(
+    val id: Long,
+    val name: String,
+    val fixedId: Long,
+    val tempId: Long,
+    val projectId: Long
 )
 
 data class Project(
@@ -87,7 +96,7 @@ data class TrashItem(
     val expireAt: Long
 )
 
-class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seirihq.db", null, 6) {
+class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seirihq.db", null, 7) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -130,6 +139,15 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seiri
                 "tags TEXT NOT NULL DEFAULT ''," +
                 "deleted_at INTEGER NOT NULL," +
                 "expire_at INTEGER NOT NULL)"
+        )
+        db.execSQL(
+            "CREATE TABLE prompt_set(" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "name TEXT NOT NULL," +
+                "fixed_id INTEGER NOT NULL DEFAULT 0," +
+                "temp_id INTEGER NOT NULL DEFAULT 0," +
+                "project_id INTEGER NOT NULL DEFAULT 0," +
+                "created_at INTEGER NOT NULL)"
         )
         db.execSQL(
             "CREATE TABLE tag(" +
@@ -175,6 +193,17 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seiri
         if (oldVersion < 2) {
             db.execSQL("ALTER TABLE media ADD COLUMN source TEXT NOT NULL DEFAULT 'saf'")
             db.execSQL("ALTER TABLE media ADD COLUMN writable INTEGER NOT NULL DEFAULT 0")
+        }
+        if (oldVersion < 7) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS prompt_set(" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "name TEXT NOT NULL," +
+                    "fixed_id INTEGER NOT NULL DEFAULT 0," +
+                    "temp_id INTEGER NOT NULL DEFAULT 0," +
+                    "project_id INTEGER NOT NULL DEFAULT 0," +
+                    "created_at INTEGER NOT NULL)"
+            )
         }
         if (oldVersion < 6) {
             db.execSQL("ALTER TABLE media ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
@@ -320,6 +349,42 @@ class Repository(context: Context) {
         helper.writableDatabase.insertWithOnConflict(
             "state", null, v, SQLiteDatabase.CONFLICT_REPLACE
         )
+    }
+
+    fun promptSets(): List<PromptSet> {
+        val out = ArrayList<PromptSet>()
+        val c = helper.readableDatabase.rawQuery(
+            "SELECT id,name,fixed_id,temp_id,project_id FROM prompt_set ORDER BY id ASC",
+            null
+        )
+        c.use {
+            while (it.moveToNext()) {
+                out.add(
+                    PromptSet(
+                        id = it.getLong(0),
+                        name = it.getString(1),
+                        fixedId = it.getLong(2),
+                        tempId = it.getLong(3),
+                        projectId = it.getLong(4)
+                    )
+                )
+            }
+        }
+        return out
+    }
+
+    fun insertPromptSet(name: String, fixedId: Long, tempId: Long, projectId: Long): Long {
+        val v = ContentValues()
+        v.put("name", name)
+        v.put("fixed_id", fixedId)
+        v.put("temp_id", tempId)
+        v.put("project_id", projectId)
+        v.put("created_at", System.currentTimeMillis())
+        return helper.writableDatabase.insert("prompt_set", null, v)
+    }
+
+    fun deletePromptSet(id: Long) {
+        helper.writableDatabase.delete("prompt_set", "id=?", arrayOf(id.toString()))
     }
 
     fun projects(): List<Project> {

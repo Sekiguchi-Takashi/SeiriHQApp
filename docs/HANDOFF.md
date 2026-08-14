@@ -2,7 +2,7 @@
 
 ## 現在地
 
-v1.10。プロンプト交通整理と素材交通整理を1アプリに統合した最小構成に、
+v1.11。プロンプト交通整理と素材交通整理を1アプリに統合した最小構成に、
 パスコード＋指紋のロック、ファイル権限による原本削除、ゴミ箱を追加した。
 
 ## 構成
@@ -47,6 +47,10 @@ SeiriHQApp/
 - Repository.addTag は書き込み後に読み戻して検証し、Result で失敗理由を返す
 - media.pinned が常用フラグ。Inboxの既定は pinned のみ表示（state の pinned_only）
 - 常用は状態と独立。アーカイブは status を変えるだけでファイルは残す
+- prompt_set は①②とプロジェクトの組み合わせ。適用すると activeProjectId も切り替わる
+- activeProjectId が立っていると Store.addMedia が取り込み時に自動で linkProject する
+- deploy.sh は push 前に `git pull --rebase origin main` を実行する（CatalogApp の rollout.sh が
+  release.yml と ci/appathy.keystore を API 経由で直接コミットしているため）
 - クリップボードは他プロバイダのURIをそのまま渡せないため、cacheDir/share へ複製して
   FileProvider のURIを ClipData.newUri で渡す（file_paths.xml に cache-path を追加済み）
 - 横に並べるボタンは FlowRow を使う。Row のままだと画面幅で潰れる
