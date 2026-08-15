@@ -2,7 +2,7 @@
 
 ## 現在地
 
-v1.11.1。プロンプト交通整理と素材交通整理を1アプリに統合した最小構成に、
+v1.11.2。プロンプト交通整理と素材交通整理を1アプリに統合した最小構成に、
 パスコード＋指紋のロック、ファイル権限による原本削除、ゴミ箱を追加した。
 
 ## 構成
@@ -31,6 +31,8 @@ SeiriHQApp/
 
 - Roomは使わない。SQLiteOpenHelper直。KSP不使用
 - Gradle Wrapperのjarを同梱していないため、CIは `gradle/actions/setup-gradle` で Gradle 8.9 を用意し `gradle assembleDebug` を実行する
+- build.yml に actions/upload-artifact を入れない（Artifacts の無料枠が枯渇してビルドが失敗するため）。
+  build.yml はコンパイル確認用、APKの配布は Release から行う。失敗時は `e:` 行をログに直接出す
 - 素材取り込みは SAF（`OpenMultipleDocuments`）。メディア権限を要求しない
 - 動画サムネイルは coil-video。`SeiriApp`（Application）で ImageLoaderFactory を実装している
 - ダウンロード整理は DocumentsContract で直下を1クエリ取得する（DocumentFile.listFiles は遅い）
