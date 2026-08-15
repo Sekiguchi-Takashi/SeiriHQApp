@@ -2,7 +2,7 @@
 
 ## 現在地
 
-v1.11。プロンプト交通整理と素材交通整理を1アプリに統合した最小構成に、
+v1.11.1。プロンプト交通整理と素材交通整理を1アプリに統合した最小構成に、
 パスコード＋指紋のロック、ファイル権限による原本削除、ゴミ箱を追加した。
 
 ## 構成
@@ -49,8 +49,12 @@ SeiriHQApp/
 - 常用は状態と独立。アーカイブは status を変えるだけでファイルは残す
 - prompt_set は①②とプロジェクトの組み合わせ。適用すると activeProjectId も切り替わる
 - activeProjectId が立っていると Store.addMedia が取り込み時に自動で linkProject する
-- deploy.sh は push 前に `git pull --rebase origin main` を実行する（CatalogApp の rollout.sh が
-  release.yml と ci/appathy.keystore を API 経由で直接コミットしているため）
+- deploy.sh は恒久仕様。push 前に `git pull --rebase origin main` を実行し、
+  そのあと GitHub API で直近リリースのタグを取得して次のパッチ版タグを発行するところまで1コマンドで行う
+  （CatalogApp の rollout.sh が release.yml と ci/appathy.keystore を API 経由で直接コミットするため、
+  pull --rebase が無いと push が rejected になる）
+- .github/workflows/release.yml と ci/appathy.keystore、ci/ ディレクトリは配布ビルドに必要。削除しない
+- タグを打つと Actions がビルドして Release を作り、自作アプリストアに更新として現れる
 - クリップボードは他プロバイダのURIをそのまま渡せないため、cacheDir/share へ複製して
   FileProvider のURIを ClipData.newUri で渡す（file_paths.xml に cache-path を追加済み）
 - 横に並べるボタンは FlowRow を使う。Row のままだと画面幅で潰れる
