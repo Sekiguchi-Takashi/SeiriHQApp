@@ -2,7 +2,7 @@
 
 ## 現在地
 
-v1.11.2。プロンプト交通整理と素材交通整理を1アプリに統合した最小構成に、
+v1.11.3。プロンプト交通整理と素材交通整理を1アプリに統合した最小構成に、
 パスコード＋指紋のロック、ファイル権限による原本削除、ゴミ箱を追加した。
 
 ## 構成
@@ -30,9 +30,8 @@ SeiriHQApp/
 ## 実装上の決めごと
 
 - Roomは使わない。SQLiteOpenHelper直。KSP不使用
-- Gradle Wrapperのjarを同梱していないため、CIは `gradle/actions/setup-gradle` で Gradle 8.9 を用意し `gradle assembleDebug` を実行する
-- build.yml に actions/upload-artifact を入れない（Artifacts の無料枠が枯渇してビルドが失敗するため）。
-  build.yml はコンパイル確認用、APKの配布は Release から行う。失敗時は `e:` 行をログに直接出す
+- build.yml は作らない。CIは release.yml（タグ起動）のみ。
+  actions/upload-artifact は使わない（Artifacts枠0.5GBが枯渇して全ビルドが落ちるため）
 - 素材取り込みは SAF（`OpenMultipleDocuments`）。メディア権限を要求しない
 - 動画サムネイルは coil-video。`SeiriApp`（Application）で ImageLoaderFactory を実装している
 - ダウンロード整理は DocumentsContract で直下を1クエリ取得する（DocumentFile.listFiles は遅い）
@@ -51,10 +50,13 @@ SeiriHQApp/
 - 常用は状態と独立。アーカイブは status を変えるだけでファイルは残す
 - prompt_set は①②とプロジェクトの組み合わせ。適用すると activeProjectId も切り替わる
 - activeProjectId が立っていると Store.addMedia が取り込み時に自動で linkProject する
-- deploy.sh は恒久仕様。push 前に `git pull --rebase origin main` を実行し、
-  そのあと GitHub API で直近リリースのタグを取得して次のパッチ版タグを発行するところまで1コマンドで行う
-  （CatalogApp の rollout.sh が release.yml と ci/appathy.keystore を API 経由で直接コミットするため、
-  pull --rebase が無いと push が rejected になる）
+- deploy.sh は恒久仕様。push → pull --rebase → タグ発行まで1コマンドで行う。
+  次タグは `git tag --list 'v*' | sort -V` の最大値から算出し、`git tag` / `git push origin タグ名` で
+  ローカル発行する（APIのheads参照は反映遅延で一つ前のタグに付くため禁止）。
+  第2引数に notag を渡すと push のみ。
+  pull --rebase が無いと push が rejected になる（CatalogApp の rollout.sh が
+  release.yml と ci/appathy.keystore を API 経由で直接コミットするため）
+- ファイルを削除する納品では deploy.sh に `rm -f 対象パス` を足す（unzip -o は端末の旧ファイルを消さない）
 - .github/workflows/release.yml と ci/appathy.keystore、ci/ ディレクトリは配布ビルドに必要。削除しない
 - タグを打つと Actions がビルドして Release を作り、自作アプリストアに更新として現れる
 - クリップボードは他プロバイダのURIをそのまま渡せないため、cacheDir/share へ複製して

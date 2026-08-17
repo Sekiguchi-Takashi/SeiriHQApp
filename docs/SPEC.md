@@ -683,7 +683,7 @@ androidx.biometric（指紋認証。MainActivity は FragmentActivity）
 androidx.documentfile（ゴミ箱フォルダへの書き込み）
 androidx.work（ゴミ箱の定期削除）
 FileProvider（アプリ内ゴミ箱のファイル共有）
-GitHub Actions で assembleDebug
+GitHub Actions（release.yml・タグ起動）でビルドし Release を作る
 app/debug.keystore を固定（上書きインストール可）
 ```
 
