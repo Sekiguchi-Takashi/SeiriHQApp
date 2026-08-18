@@ -2,7 +2,7 @@
 
 ## 現在地
 
-v1.12。プロンプト交通整理と素材交通整理を1アプリに統合した最小構成に、
+v1.13。プロンプト交通整理と素材交通整理を1アプリに統合した最小構成に、
 パスコード＋指紋のロック、ファイル権限による原本削除、ゴミ箱を追加した。
 
 ## 構成
@@ -80,7 +80,9 @@ SeiriHQApp/
 ## ライブラリの実装メモ
 
 - 画像は filesDir/library/<charaId>/<timestamp>_<名前>.jpg。DBは絶対パスを持つ
-- 取り込みは inSampleSize で粗く落としてから createScaledBitmap。OOM回避のため順序を変えない
+- 取り込みは inSampleSize で長辺が上限を超えないところまで落としてから createScaledBitmap。
+  OutOfMemoryError を捕まえて inSampleSize を倍にして再試行する（32まで）
+- 取り込み失敗時は最初のエラー文言をトーストに出す（件数だけだと切り分けできないため）
 - Exifの向きは androidx.exifinterface で補正してから保存する
 - バックアップは DocumentFile で <tree>/グループ/キャラ/ を作り、同名があれば飛ばす
 - 旧素材タブ（MediaTab）はそのまま。参照型の資産を消していないので、必要なら戻せる

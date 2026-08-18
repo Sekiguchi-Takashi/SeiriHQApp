@@ -5,7 +5,6 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
@@ -27,8 +26,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.appathy.seirihq.data.Store
-import com.appathy.seirihq.ui.LibraryTab
-import com.appathy.seirihq.ui.MediaTab
+import com.appathy.seirihq.ui.ImagesTab
 import com.appathy.seirihq.ui.PromptTab
 import com.appathy.seirihq.ui.SettingsTab
 
@@ -47,7 +45,7 @@ class MainActivity : FragmentActivity() {
 fun AppRoot() {
     val context = LocalContext.current
     val store = remember { Store(context) }
-    var tab by remember { mutableIntStateOf(0) }
+    var tab by remember { mutableIntStateOf(1) }
     val lifecycleOwner = LocalLifecycleOwner.current
 
     DisposableEffect(lifecycleOwner) {
@@ -65,24 +63,18 @@ fun AppRoot() {
                 NavigationBarItem(
                     selected = tab == 0,
                     onClick = { tab = 0 },
-                    icon = { Icon(Icons.Default.Home, contentDescription = null) },
-                    label = { Text("ライブラリ") }
-                )
-                NavigationBarItem(
-                    selected = tab == 1,
-                    onClick = { tab = 1 },
                     icon = { Icon(Icons.Default.Edit, contentDescription = null) },
                     label = { Text("プロンプト") }
                 )
                 NavigationBarItem(
-                    selected = tab == 2,
-                    onClick = { tab = 2 },
+                    selected = tab == 1,
+                    onClick = { tab = 1 },
                     icon = { Icon(Icons.Default.List, contentDescription = null) },
-                    label = { Text("旧素材") }
+                    label = { Text("画像") }
                 )
                 NavigationBarItem(
-                    selected = tab == 3,
-                    onClick = { tab = 3 },
+                    selected = tab == 2,
+                    onClick = { tab = 2 },
                     icon = { Icon(Icons.Default.Settings, contentDescription = null) },
                     label = { Text("設定") }
                 )
@@ -91,9 +83,8 @@ fun AppRoot() {
     ) { inner ->
         val modifier = Modifier.padding(inner)
         when (tab) {
-            0 -> LibraryTab(store, modifier)
-            1 -> PromptTab(store, modifier)
-            2 -> MediaTab(store, modifier)
+            0 -> PromptTab(store, modifier)
+            1 -> ImagesTab(store, modifier)
             else -> SettingsTab(store, modifier)
         }
     }

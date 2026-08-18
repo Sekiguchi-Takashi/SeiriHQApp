@@ -18,14 +18,15 @@ object PhotoStore {
         return dir
     }
 
+    /**
+     * 復号時点で必要以上の大きさを持たないようにする。
+     * 端末のメモリ不足（大きな写真を何十枚も続けて読むと起きる）を避けるのが目的。
+     */
     private fun sampleSize(width: Int, height: Int, maxEdge: Int): Int {
-        if (maxEdge <= 0) return 1
+        val longEdge = maxOf(width, height)
+        val limit = if (maxEdge <= 0) 4096 else maxEdge
         var sample = 1
-        var w = width
-        var h = height
-        while (w / 2 >= maxEdge && h / 2 >= maxEdge) {
-            w /= 2
-            h /= 2
+        while (longEdge / sample > limit) {
             sample *= 2
         }
         return sample
@@ -68,15 +69,27 @@ object PhotoStore {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         resolver.openInputStream(source)?.use { BitmapFactory.decodeStream(it, null, bounds) }
             ?: error("画像を読み込めません")
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) error("画像として読めません")
 
-        val options = BitmapFactory.Options().apply {
-            inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight, maxEdge)
+        var sample = sampleSize(bounds.outWidth, bounds.outHeight, maxEdge)
+        var decoded: Bitmap? = null
+        var lastError: Throwable? = null
+        while (decoded == null && sample <= 32) {
+            try {
+                val options = BitmapFactory.Options().apply { inSampleSize = sample }
+                decoded = resolver.openInputStream(source)?.use {
+                    BitmapFactory.decodeStream(it, null, options)
+                }
+                if (decoded == null) lastError = IllegalStateException("画像を復号できません")
+            } catch (error: OutOfMemoryError) {
+                lastError = IllegalStateException("メモリ不足のため縮小して再試行しました")
+                sample *= 2
+            }
+            if (decoded == null && sample <= 32) sample *= 2
         }
-        val decoded = resolver.openInputStream(source)?.use {
-            BitmapFactory.decodeStream(it, null, options)
-        } ?: error("画像を復号できません")
+        val bitmap = decoded ?: throw (lastError ?: IllegalStateException("画像を復号できません"))
 
-        val turned = rotate(context, source, decoded)
+        val turned = rotate(context, source, bitmap)
 
         val longEdge = maxOf(turned.width, turned.height)
         val scaled = if (maxEdge > 0 && longEdge > maxEdge) {
@@ -91,15 +104,24 @@ object PhotoStore {
             turned
         }
 
-        val stem = displayName.substringBeforeLast('.', displayName).take(40)
-        val file = File(charaDir(context, charaId), "${System.currentTimeMillis()}_$stem.jpg")
+        val stem = displayName.substringBeforeLast('.', displayName)
+            .replace(Regex("[^A-Za-z0-9._\\-]"), "_")
+            .take(40)
+            .ifBlank { "photo" }
+        val dir = charaDir(context, charaId)
+        var file = File(dir, "${System.currentTimeMillis()}_$stem.jpg")
+        var index = 2
+        while (file.exists()) {
+            file = File(dir, "${System.currentTimeMillis()}_${stem}_$index.jpg")
+            index++
+        }
         FileOutputStream(file).use { out ->
             scaled.compress(Bitmap.CompressFormat.JPEG, quality, out)
         }
 
         if (scaled !== turned) scaled.recycle()
-        if (turned !== decoded) turned.recycle()
-        decoded.recycle()
+        if (turned !== bitmap) turned.recycle()
+        bitmap.recycle()
 
         file.absolutePath to file.length()
     }

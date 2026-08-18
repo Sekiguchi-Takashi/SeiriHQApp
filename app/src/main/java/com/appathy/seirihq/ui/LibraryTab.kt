@@ -475,19 +475,33 @@ private fun CharaDetailScreen(
             scope.launch {
                 var done = 0
                 var failed = 0
+                var firstError = ""
                 uris.forEach { uri ->
                     progress = "${done + failed + 1} / ${uris.size}"
-                    val name = withContext(Dispatchers.IO) { pickedName(context, uri) }
+                    val name = withContext(Dispatchers.IO) {
+                        runCatching { pickedName(context, uri) }.getOrDefault("photo")
+                    }
                     val result = withContext(Dispatchers.IO) {
                         library.importPhoto(charaId, uri, name)
                     }
-                    if (result.isSuccess) done++ else failed++
+                    if (result.isSuccess) {
+                        done++
+                    } else {
+                        failed++
+                        if (firstError.isEmpty()) {
+                            firstError = result.exceptionOrNull()?.message ?: "原因不明"
+                        }
+                    }
+                    library.loadPhotos(charaId)
                 }
-                library.loadPhotos(charaId)
                 library.reloadGroups()
                 progress = ""
-                val note = if (failed > 0) "（${failed}件は失敗）" else ""
-                Toast.makeText(context, "${done}件を取り込みました$note", Toast.LENGTH_SHORT).show()
+                val message = if (failed == 0) {
+                    "${done}件を取り込みました"
+                } else {
+                    "${done}件成功 / ${failed}件失敗: $firstError"
+                }
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
             }
         }
     }
