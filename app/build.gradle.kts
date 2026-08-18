@@ -12,8 +12,8 @@ android {
         applicationId = "com.appathy.seirihq"
         minSdk = 26
         targetSdk = 34
-        versionCode = 19
-        versionName = "1.11.3"
+        versionCode = 20
+        versionName = "1.12"
     }
 
     signingConfigs {
@@ -70,5 +70,6 @@ dependencies {
     implementation("androidx.fragment:fragment-ktx:1.8.3")
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
 }

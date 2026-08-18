@@ -13,6 +13,8 @@ class Store(context: Context) {
     private val repo = Repository(context)
     private val appContext = context.applicationContext
 
+    val library = LibraryStore(context)
+
     var fixedPrompts by mutableStateOf<List<PromptItem>>(emptyList())
         private set
     var tempPrompts by mutableStateOf<List<PromptItem>>(emptyList())

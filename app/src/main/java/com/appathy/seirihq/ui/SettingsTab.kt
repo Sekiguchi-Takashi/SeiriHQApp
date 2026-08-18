@@ -62,6 +62,18 @@ fun SettingsTab(store: Store, modifier: Modifier = Modifier) {
         granted = FilePermission.granted(context)
     }
 
+    val backupPicker = rememberLauncherForActivityResult(OpenDocumentTree()) { uri: Uri? ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
+            store.library.updateBackupTree(uri.toString())
+        }
+    }
+
     val folderPicker = rememberLauncherForActivityResult(OpenDocumentTree()) { uri: Uri? ->
         if (uri != null) {
             runCatching {
@@ -83,6 +95,60 @@ fun SettingsTab(store: Store, modifier: Modifier = Modifier) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("ライブラリ（取り込みと保存）", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "取り込んだ画像は圧縮してアプリ内に保存します。端末の元ファイルは変更しません。",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text("長辺の上限", style = MaterialTheme.typography.labelLarge)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(1280, 2048, 0).forEach { edge ->
+                            FilterChip(
+                                selected = store.library.maxEdge == edge,
+                                onClick = { store.library.updateMaxEdge(edge) },
+                                label = { Text(if (edge == 0) "原寸" else "${edge}px") }
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text("画質", style = MaterialTheme.typography.labelLarge)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(70, 85, 95).forEach { q ->
+                            FilterChip(
+                                selected = store.library.quality == q,
+                                onClick = { store.library.updateQuality(q) },
+                                label = { Text("$q") }
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Text("バックアップ先", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        if (store.library.backupTreeUri.isNullOrEmpty()) "未設定"
+                        else Uri.decode(store.library.backupTreeUri),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { backupPicker.launch(null) }) {
+                            Text("フォルダを選ぶ")
+                        }
+                        if (!store.library.backupTreeUri.isNullOrEmpty()) {
+                            TextButton(onClick = { store.library.updateBackupTree(null) }) {
+                                Text("解除")
+                            }
+                        }
+                    }
+                    Text(
+                        "書き出しは各グループの画面から行います。グループ名／キャラクター名のフォルダを作って複製します。",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text("プロジェクト", style = MaterialTheme.typography.titleMedium)
@@ -287,6 +353,10 @@ fun SettingsTab(store: Store, modifier: Modifier = Modifier) {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text("この版でできること", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(4.dp))
+                    Text("・ライブラリ：グループ＞キャラクター＞画像。取り込みは圧縮してアプリ内に保存")
+                    Text("・グループにタグ、キャラクターと画像に30文字のメモ、画像にステータス")
+                    Text("・旧素材タブ：これまでの参照型の機能（Inbox・ゴミ箱・整理）をまとめて退避")
                     Spacer(Modifier.height(4.dp))
                     Text("・①固定30件 / ②個別切替20件 / ③任意入力の合成とコピー")
                     Text("・素材の取り込み、Inbox一覧、状態・タグ・プロジェクト付与、検索")

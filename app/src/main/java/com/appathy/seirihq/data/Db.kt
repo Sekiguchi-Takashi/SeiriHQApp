@@ -36,6 +36,16 @@ const val KEY_LAST_PROMPT = "last_prompt"
 const val KEY_LINK_IMPORTS = "link_imports"
 const val KEY_PINNED_ONLY = "pinned_only"
 const val KEY_ACTIVE_PROJECT = "active_project"
+const val KEY_BACKUP_TREE = "backup_tree"
+const val KEY_MAX_EDGE = "max_edge"
+const val KEY_QUALITY = "quality"
+
+const val TAG_GROUP = "group"
+
+const val DEFAULT_MAX_EDGE = 2048
+const val DEFAULT_QUALITY = 85
+
+val PHOTO_STATUSES = listOf("未整理", "採用", "保留", "不要")
 const val KEY_USE_TRASH = "use_trash"
 const val KEY_RETENTION = "retention_days"
 const val DEFAULT_RETENTION_DAYS = 14
@@ -49,6 +59,33 @@ data class PromptItem(
     val description: String,
     val body: String,
     val updatedAt: Long
+)
+
+data class PhotoGroup(
+    val id: Long,
+    val name: String,
+    val tags: List<String>,
+    val charaCount: Int,
+    val photoCount: Int
+)
+
+data class Chara(
+    val id: Long,
+    val groupId: Long,
+    val name: String,
+    val memo: String,
+    val photoCount: Int
+)
+
+data class Photo(
+    val id: Long,
+    val charaId: Long,
+    val path: String,
+    val name: String,
+    val memo: String,
+    val status: String,
+    val bytes: Long,
+    val addedAt: Long
 )
 
 data class PromptSet(
@@ -96,7 +133,7 @@ data class TrashItem(
     val expireAt: Long
 )
 
-class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seirihq.db", null, 7) {
+class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seirihq.db", null, 8) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -139,6 +176,37 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seiri
                 "tags TEXT NOT NULL DEFAULT ''," +
                 "deleted_at INTEGER NOT NULL," +
                 "expire_at INTEGER NOT NULL)"
+        )
+        db.execSQL(
+            "CREATE TABLE photo_group(" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "name TEXT NOT NULL," +
+                "created_at INTEGER NOT NULL)"
+        )
+        db.execSQL(
+            "CREATE TABLE group_tag(" +
+                "group_id INTEGER NOT NULL," +
+                "tag_id INTEGER NOT NULL," +
+                "PRIMARY KEY(group_id, tag_id))"
+        )
+        db.execSQL(
+            "CREATE TABLE chara(" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "group_id INTEGER NOT NULL," +
+                "name TEXT NOT NULL," +
+                "memo TEXT NOT NULL DEFAULT ''," +
+                "created_at INTEGER NOT NULL)"
+        )
+        db.execSQL(
+            "CREATE TABLE photo(" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "chara_id INTEGER NOT NULL," +
+                "path TEXT NOT NULL," +
+                "name TEXT NOT NULL," +
+                "memo TEXT NOT NULL DEFAULT ''," +
+                "status TEXT NOT NULL," +
+                "bytes INTEGER NOT NULL DEFAULT 0," +
+                "added_at INTEGER NOT NULL)"
         )
         db.execSQL(
             "CREATE TABLE prompt_set(" +
@@ -193,6 +261,39 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "seiri
         if (oldVersion < 2) {
             db.execSQL("ALTER TABLE media ADD COLUMN source TEXT NOT NULL DEFAULT 'saf'")
             db.execSQL("ALTER TABLE media ADD COLUMN writable INTEGER NOT NULL DEFAULT 0")
+        }
+        if (oldVersion < 8) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS photo_group(" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "name TEXT NOT NULL," +
+                    "created_at INTEGER NOT NULL)"
+            )
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS group_tag(" +
+                    "group_id INTEGER NOT NULL," +
+                    "tag_id INTEGER NOT NULL," +
+                    "PRIMARY KEY(group_id, tag_id))"
+            )
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS chara(" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "group_id INTEGER NOT NULL," +
+                    "name TEXT NOT NULL," +
+                    "memo TEXT NOT NULL DEFAULT ''," +
+                    "created_at INTEGER NOT NULL)"
+            )
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS photo(" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "chara_id INTEGER NOT NULL," +
+                    "path TEXT NOT NULL," +
+                    "name TEXT NOT NULL," +
+                    "memo TEXT NOT NULL DEFAULT ''," +
+                    "status TEXT NOT NULL," +
+                    "bytes INTEGER NOT NULL DEFAULT 0," +
+                    "added_at INTEGER NOT NULL)"
+            )
         }
         if (oldVersion < 7) {
             db.execSQL(

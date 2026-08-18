@@ -1,4 +1,4 @@
-# 整理HQ（SeiriHQApp）統合仕様書 — v1.11
+# 整理HQ（SeiriHQApp）統合仕様書 — v1.12
 
 ## 1. 概要
 
@@ -561,11 +561,76 @@ Inboxの既定表示を「保管庫」から「よく使う数枚のパレット
 
 これで、プロンプト側と素材側が同じプロジェクトで一本につながる。
 
+
+---
+
+## 4.21 ライブラリ（v1.12・アプリの主軸）
+
+参照型（端末のファイルを指すだけ）では、フォルダ側の増減に追従できない。
+そこで、使う画像は圧縮してアプリ内に取り込み、アプリの中だけで完結させる。
+
+```text
+グループ（例: ゲームA）
+├─ タグ（人 / 景色 / リアル / イラスト / 使用中 / 未使用 など）
+└─ キャラクター（例: キャラクターA）
+   ├─ メモ（30文字）
+   └─ 画像
+      ├─ ステータス（未整理 / 採用 / 保留 / 不要）
+      └─ メモ（30文字）
+```
+
+### 取り込み
+
+```text
+キャラクター画面の ＋
+   ↓
+画像を複数選択
+   ↓
+Exifの向きを補正 → 長辺を上限まで縮小 → JPEGで保存
+   ↓
+アプリ内（filesDir/library/キャラID/）へ保存
+```
+
+- 既定は長辺2048px・画質85。設定で 1280 / 2048 / 原寸、70 / 85 / 95 を選べる
+- 端末の元ファイルは読むだけで、変更も削除もしない
+- 取り込み後は端末側で自由にファイルを消してよい（アプリ内の複製は残る）
+
+### 削除とバックアップ
+
+```text
+削除     画像・キャラクター・グループの単位でアプリ内から削除する
+         （アプリ内の実ファイルも消える。取り消せない）
+バックアップ 設定で選んだフォルダ（Rakuten Drive など）へ複製する
+         <選んだフォルダ>/グループ名/キャラクター名/ に書き出す
+         同名ファイルが既にあれば飛ばす
+```
+
+削除の取り消しはできないため、消す前にバックアップを実行する運用を前提とする。
+
+### 一覧の見え方
+
+- グループ一覧：タグで絞り込み、キャラ数と枚数を表示
+- キャラクター画面：メモを常に上に表示、ステータスで絞り込み、3列のグリッド
+- サムネイル：左上にステータス（未整理以外）、下辺にメモ
+
+---
+
+## 4.22 旧素材タブ
+
+これまでの参照型の機能（Inbox・常用パレット・交通整理・プロジェクト・ゴミ箱・
+ダウンロード整理・ZIP）は「旧素材」タブへまとめて退避した。機能はそのまま残す。
+
+タブ構成：
+
+```text
+ライブラリ / プロンプト / 旧素材 / 設定
+```
+
 ---
 
 ## 5. データモデル（実装済み）
 
-SQLite（`seirihq.db` / version 7）。両機能で1つのDBを共有する。
+SQLite（`seirihq.db` / version 8）。両機能で1つのDBを共有する。
 
 ```text
 prompt(id, kind['fixed'|'temp'], name, description, body, created_at, updated_at)
@@ -574,11 +639,16 @@ state(key, value)                       -- active_fixed / active_temp / pin_hash
                                         -- trash_tree / retention_days
                                         -- clean_tree / use_trash
                                         -- last_prompt / link_imports / pinned_only
-                                        -- active_project
+                                        -- active_project / backup_tree
+                                        -- max_edge / quality
 project(id, name, created_at)
 media(id, uri UNIQUE, kind, name, status, added_at, source, writable,
       source_prompt_id, pinned)
 prompt_set(id, name, fixed_id, temp_id, project_id, created_at)
+photo_group(id, name, created_at)
+group_tag(group_id, tag_id)             -- tag.kind = group
+chara(id, group_id, name, memo, created_at)
+photo(id, chara_id, path, name, memo, status, bytes, added_at)
 tag(id, name, kind)                     -- kind: user / ai / system
 media_tag(media_id, tag_id, confirmed)  -- N:M
 media_project(media_id, project_id)     -- N:M
@@ -679,6 +749,7 @@ AGP 8.5.2 / Kotlin 2.0.20 / Gradle 8.9
 minSdk 26 / targetSdk 34
 SQLiteOpenHelper（アノテーション処理なし）
 Coil / coil-video（画像・動画サムネイル。SeiriApp で ImageLoader を差し替え）
+androidx.exifinterface（取り込み時の向き補正）
 androidx.biometric（指紋認証。MainActivity は FragmentActivity）
 androidx.documentfile（ゴミ箱フォルダへの書き込み）
 androidx.work（ゴミ箱の定期削除）
