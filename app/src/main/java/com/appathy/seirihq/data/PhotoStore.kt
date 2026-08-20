@@ -67,8 +67,8 @@ object PhotoStore {
         val resolver = context.contentResolver
 
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        resolver.openInputStream(source)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-            ?: error("画像を読み込めません")
+        val header = resolver.openInputStream(source) ?: error("画像を開けません")
+        header.use { BitmapFactory.decodeStream(it, null, bounds) }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) error("画像として読めません")
 
         var sample = sampleSize(bounds.outWidth, bounds.outHeight, maxEdge)
@@ -77,9 +77,9 @@ object PhotoStore {
         while (decoded == null && sample <= 32) {
             try {
                 val options = BitmapFactory.Options().apply { inSampleSize = sample }
-                decoded = resolver.openInputStream(source)?.use {
-                    BitmapFactory.decodeStream(it, null, options)
-                }
+                val stream = resolver.openInputStream(source)
+                    ?: error("画像を開けません")
+                decoded = stream.use { BitmapFactory.decodeStream(it, null, options) }
                 if (decoded == null) lastError = IllegalStateException("画像を復号できません")
             } catch (error: OutOfMemoryError) {
                 lastError = IllegalStateException("メモリ不足のため縮小して再試行しました")
